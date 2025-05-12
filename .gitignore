@@ -153,7 +153,6 @@ obj*/
 VTune\ Profiler\ Results/
 
 # Specific Source build products
-bin
 *.project
 
 client.pdb
@@ -299,13 +298,15 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
-x64/
 x86/
 [Ww][Ii][Nn]32/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 bld/
-[Bb]in/
+**/[Bb]in/**/*.dll
+**/[Bb]in/**/*.pdb
+**/[Bb]in/**/*.lib
+**/[Bb]in/**/*.so
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
