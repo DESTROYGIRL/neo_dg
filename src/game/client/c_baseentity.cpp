@@ -997,7 +997,19 @@ void C_BaseEntity::Clear( void )
 	m_nCreationTick = -1;
 	m_RefEHandle.Term();
 	m_ModelInstance = MODEL_INSTANCE_INVALID;
+#ifdef NEO
+	m_ShadowHandles.Purge();
+	m_ShadowHandles.AddToTail(CLIENTSHADOW_INVALID_HANDLE);
+	Assert(m_ShadowHandles.Count() == 1);
+
+	m_ShadowAlphaFractions.Purge();
+	m_ShadowAlphaFractions.AddToTail(1);
+	Assert(m_ShadowAlphaFractions.Count() == 1);
+
+	Assert(m_ShadowHandles.Count() == m_ShadowAlphaFractions.Count());
+#else
 	m_ShadowHandle = CLIENTSHADOW_INVALID_HANDLE;
+#endif
 	m_hRender = INVALID_CLIENT_RENDER_HANDLE;
 	m_hThink = INVALID_THINK_HANDLE;
 	m_AimEntsListHandle = INVALID_AIMENTS_LIST_HANDLE;
@@ -3557,10 +3569,27 @@ void C_BaseEntity::ComputeFxBlend( void )
 	}
 
 	// Tell our shadow
+#ifdef NEO
+	const auto nShadows = ShadowHandles().Count();
+	for (int i = 0; i < nShadows; ++i)
+	{
+		auto shadow = GetShadowHandle(i);
+		if (shadow == CLIENTSHADOW_INVALID_HANDLE)
+			continue;
+		if (shadow == CLIENTSHADOW_OUT_OF_RANGE)
+		{
+			Assert(false);
+			break;
+		}
+		const int alpha = int(255 * m_ShadowAlphaFractions[i]);
+		g_pClientShadowMgr->SetFalloffBias(shadow, (alpha / nShadows - m_nRenderFXBlend));
+	}
+#else
 	if ( m_ShadowHandle != CLIENTSHADOW_INVALID_HANDLE )
 	{
 		g_pClientShadowMgr->SetFalloffBias( m_ShadowHandle, (255 - m_nRenderFXBlend) );
 	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -3975,6 +4004,25 @@ void C_BaseEntity::CreateShadow()
 	}
 	else
 	{
+#ifdef NEO
+		for (int i = 0;; ++i)
+		{
+			auto shadow = GetShadowHandle(i);
+			if (shadow == CLIENTSHADOW_OUT_OF_RANGE)
+				break;
+
+			if (shadow == CLIENTSHADOW_INVALID_HANDLE)
+			{
+				int flags = SHADOW_FLAGS_SHADOW;
+				if (shadowType != SHADOWS_SIMPLE)
+					flags |= SHADOW_FLAGS_USE_RENDER_TO_TEXTURE;
+				if (shadowType == SHADOWS_RENDER_TO_TEXTURE_DYNAMIC)
+					flags |= SHADOW_FLAGS_ANIMATING_SOURCE;
+				m_ShadowHandles[i] = g_pClientShadowMgr->CreateShadow(GetClientHandle(), flags);
+				m_ShadowAlphaFractions[i] = 1.0;
+			}
+		}
+#else
 		if (m_ShadowHandle == CLIENTSHADOW_INVALID_HANDLE)
 		{
 			int flags = SHADOW_FLAGS_SHADOW;
@@ -3984,6 +4032,7 @@ void C_BaseEntity::CreateShadow()
 				flags |= SHADOW_FLAGS_ANIMATING_SOURCE;
 			m_ShadowHandle = g_pClientShadowMgr->CreateShadow(GetClientHandle(), flags);
 		}
+#endif
 	}
 }
 
@@ -3994,11 +4043,26 @@ void C_BaseEntity::DestroyShadow()
 {
 	// NOTE: This will actually cause the shadow type to be recomputed
 	// if the entity doesn't immediately go away
+#ifdef NEO
+	for (int i = 0;; ++i)
+	{
+		auto shadow = GetShadowHandle(i);
+		if (shadow == CLIENTSHADOW_OUT_OF_RANGE)
+			break;
+		if (shadow != CLIENTSHADOW_INVALID_HANDLE)
+		{
+			g_pClientShadowMgr->DestroyShadow(shadow);
+			m_ShadowHandles[i] = CLIENTSHADOW_INVALID_HANDLE;
+			m_ShadowAlphaFractions[i] = 0;
+		}
+	}
+#else
 	if (m_ShadowHandle != CLIENTSHADOW_INVALID_HANDLE)
 	{
 		g_pClientShadowMgr->DestroyShadow(m_ShadowHandle);
 		m_ShadowHandle = CLIENTSHADOW_INVALID_HANDLE;
 	}
+#endif
 }
 
 
