@@ -84,6 +84,9 @@
 #ifdef NEO
 #include "debugoverlay_shared.h"
 #include "worldlight.h"
+#include "c_neo_player.h"
+#include <cmath>
+#include <utility>
 #endif
 
 
@@ -97,7 +100,7 @@ static ConVar r_flashlight_version2( "r_flashlight_version2", "0", FCVAR_CHEAT |
 #ifdef NEO
 void WorldLightCastShadowCallback(IConVar* pVar, const char* pszOldValue, float flOldValue);
 static ConVar r_worldlight_castshadows("r_worldlight_castshadows", "1", FCVAR_CHEAT, "Allow world lights to cast shadows", true, 0, true, 1, WorldLightCastShadowCallback);
-static ConVar r_worldlight_lerpmaxobjectvel("r_worldlight_lerpmaxobjectvel", "130.0", FCVAR_CHEAT, "The speed the object must be moving in order to make the transition between lights reach maximum speed");
+static ConVar r_worldlight_lerptime("r_worldlight_lerptime", "0.5", FCVAR_CHEAT);
 static ConVar r_worldlight_debug("r_worldlight_debug", "0", FCVAR_CHEAT);
 static ConVar r_worldlight_shortenfactor("r_worldlight_shortenfactor", "2", FCVAR_CHEAT, "Makes shadows cast from local lights shorter");
 static ConVar r_worldlight_mincastintensity("r_worldlight_mincastintensity", "0.3", FCVAR_CHEAT, "Minimum brightness of a light to be classed as shadow casting", true, 0, false, 0);
@@ -1590,7 +1593,11 @@ void CClientShadowMgr::LevelShutdownPostEntity()
 	Assert( m_Shadows.Count() == 0 );
 
 	ClientShadowHandle_t h = m_Shadows.Head();
+#ifdef NEO
+	while (h != CLIENTSHADOW_OUT_OF_RANGE)
+#else
 	while (h != CLIENTSHADOW_INVALID_HANDLE)
+#endif
 	{
 		ClientShadowHandle_t next = m_Shadows.Next(h);
 		DestroyShadow( h );
@@ -1689,7 +1696,23 @@ void CClientShadowMgr::UpdateAllShadows()
 		if ( !pRenderable )
 			continue;
 
+#ifdef NEO
+#ifdef DEBUG
+		Assert(IsValidShadowHandle(i));
+		ClientShadowHandle_t shadowHandle;
+		bool shadowHandleBelongsToRenderable{};
+		for (int j = 0; !shadowHandleBelongsToRenderable; ++j)
+		{
+			shadowHandle = pRenderable->GetShadowHandle(j);
+			if (shadowHandle == CLIENTSHADOW_OUT_OF_RANGE)
+				break;
+			shadowHandleBelongsToRenderable = shadowHandle == i;
+		}
+		Assert(shadowHandleBelongsToRenderable);
+#endif
+#else
 		Assert( pRenderable->GetShadowHandle() == i );
+#endif
 		AddToDirtyShadowList( pRenderable, true );
 	}
 }
@@ -1939,7 +1962,13 @@ ClientShadowHandle_t CClientShadowMgr::CreateShadow( ClientEntityHandle_t entity
 	IClientRenderable *pRenderable = ClientEntityList().GetClientRenderableFromHandle( entity );
 	if ( pRenderable )
 	{
+#ifdef NEO
+		// NEO FIXME (Rain): Just a hack to silence the assert for players with >1 shadows.
+		// We need to properly fix this by making the shadow dirty flags compatible with multiple shadows per renderable.
+		Assert( ToNEOPlayer(pRenderable->GetIClientUnknown()->GetBaseEntity()) || !pRenderable->IsShadowDirty( ) );
+#else
 		Assert( !pRenderable->IsShadowDirty( ) );
+#endif
 		pRenderable->MarkShadowDirty( true );
 	}
 
@@ -2289,7 +2318,11 @@ inline ShadowType_t CClientShadowMgr::GetActualShadowCastType( ClientShadowHandl
 
 inline ShadowType_t CClientShadowMgr::GetActualShadowCastType( IClientRenderable *pEnt ) const
 {
+#ifdef NEO
+	return GetActualShadowCastType( pEnt->GetShadowHandle(0) );
+#else
 	return GetActualShadowCastType( pEnt->GetShadowHandle() );
+#endif
 }
 
 
@@ -3104,6 +3137,26 @@ void CClientShadowMgr::AddToDirtyShadowList( IClientRenderable *pRenderable, boo
 	if ( pRenderable->IsShadowDirty( ) )
 		return;
 
+#ifdef NEO
+	for (int i = 0;; ++i)
+	{
+		ClientShadowHandle_t handle = pRenderable->GetShadowHandle(i);
+		if (handle == CLIENTSHADOW_OUT_OF_RANGE)
+			break;
+
+		if (handle == CLIENTSHADOW_INVALID_HANDLE)
+			continue;
+
+#ifdef _DEBUG
+		// Make sure everything's consistent
+		IClientRenderable* pShadowRenderable = ClientEntityList().GetClientRenderableFromHandle(m_Shadows[handle].m_Entity);
+		Assert(pRenderable == pShadowRenderable);
+#endif
+
+		pRenderable->MarkShadowDirty(true);
+		AddToDirtyShadowList(handle, bForce);
+	}
+#else
 	ClientShadowHandle_t handle = pRenderable->GetShadowHandle();
 	if ( handle == CLIENTSHADOW_INVALID_HANDLE )
 		return;
@@ -3119,6 +3172,7 @@ void CClientShadowMgr::AddToDirtyShadowList( IClientRenderable *pRenderable, boo
 
 	pRenderable->MarkShadowDirty( true );
 	AddToDirtyShadowList( handle, bForce );
+#endif
 }
 
 
@@ -3138,11 +3192,25 @@ void CClientShadowMgr::MarkRenderToTextureShadowDirty( ClientShadowHandle_t hand
 		IClientRenderable *pParent = GetParentShadowEntity( handle );
 		if ( pParent )
 		{
+#ifdef NEO
+			for (int i = 0;; ++i)
+			{
+				ClientShadowHandle_t parentHandle = pParent->GetShadowHandle(i);
+				if (parentHandle == CLIENTSHADOW_OUT_OF_RANGE)
+					break;
+
+				if ( parentHandle != CLIENTSHADOW_INVALID_HANDLE )
+				{
+					m_Shadows[parentHandle].m_Flags |= SHADOW_FLAGS_TEXTURE_DIRTY;
+				}
+			}
+#else
 			ClientShadowHandle_t parentHandle = pParent->GetShadowHandle();
 			if ( parentHandle != CLIENTSHADOW_INVALID_HANDLE )
 			{
 				m_Shadows[parentHandle].m_Flags |= SHADOW_FLAGS_TEXTURE_DIRTY;
 			}
+#endif
 		}
 	}
 }
@@ -4322,18 +4390,32 @@ void CClientShadowMgr::UpdateShadowDirectionFromLocalLightSource(ClientShadowHan
 		return;
 	}
 
-	// NEO NOTE DG: Using the bounding box for this will make the shadow jump around. Undone below
-	// They may appear to jump on walls sometimes, but this behaviour is visible on master currently
-	// NEO TODO: find out whats causing the size to change 3 times when player stops moving
-#if 0
+#ifdef NEO
+	CUtlVector<ClientShadow_t*> otherShadows(0, 2);
+	if (const auto neoPlayer = ToNEOPlayer(pRenderable->GetIClientUnknown()->GetBaseEntity()))
+	{
+		for (int shadowCount = 0;; ++shadowCount)
+		{
+			const auto& s = pRenderable->GetShadowHandle(shadowCount);
+			if (s == CLIENTSHADOW_OUT_OF_RANGE)
+				break;
+			if (s == CLIENTSHADOW_INVALID_HANDLE)
+				continue;
+			if (s == shadow.m_ShadowHandle)
+				continue;
+			otherShadows.AddToTail(&m_Shadows[s]);
+
+			//auto p = DotProduct(shadow.m_ShadowDir, m_Shadows[s].m_ShadowDir);
+			//DevMsg("%d -> p: %f\n", shadowCount, p);
+		}
+	}
+#endif
+
 	Vector bbMin, bbMax;
 	pRenderable->GetRenderBoundsWorldspace(bbMin, bbMax);
 	Vector origin(0.5f * (bbMin + bbMax));
 	origin.z = bbMin.z; // Putting origin at the bottom of the bounding box makes the shadows a little shorter
-#endif
 
-	Vector origin = pRenderable->GetRenderOrigin();
-	Vector objectCenter = pRenderable->GetIClientUnknown()->GetBaseEntity()->WorldSpaceCenter();
 	Vector lightPos;
 	Vector lightBrightness;
 
@@ -4343,19 +4425,45 @@ void CClientShadowMgr::UpdateShadowDirectionFromLocalLightSource(ClientShadowHan
 		float flMinBrightnessSqr = r_worldlight_mincastintensity.GetFloat();
 		flMinBrightnessSqr *= flMinBrightnessSqr;
 
-		if (g_pWorldLights->GetBrightestLightSource(objectCenter, lightPos, lightBrightness) == false || lightBrightness.LengthSqr() < flMinBrightnessSqr)
+#ifdef NEO
+		auto pEnt = pRenderable->GetIClientUnknown()->GetBaseEntity();
+		int nthShadow{};
+		if (pEnt)
+		{
+			for (int i = 0;; ++i)
+			{
+				const auto s = pEnt->GetShadowHandle(i);
+				if (s == CLIENTSHADOW_OUT_OF_RANGE)
+					break;
+				if (s == CLIENTSHADOW_INVALID_HANDLE)
+					continue;
+				if (s != shadowHandle)
+					continue;
+				nthShadow = i;
+				break;
+			}
+		}
+
+		vec_t relativeBrightness;
+		if (!g_pWorldLights->GetNthBrightestLightSource(nthShadow, pRenderable, pRenderable->GetRenderOrigin(), lightPos, lightBrightness, relativeBrightness)
+			|| lightBrightness.LengthSqr() < flMinBrightnessSqr)
+#else
+		if (g_pWorldLights->GetBrightestLightSource(pRenderable->GetRenderOrigin(), lightPos, lightBrightness) == false || lightBrightness.LengthSqr() < flMinBrightnessSqr)
+#endif
 		{
 			// Didn't find a light source at all, use default shadow direction
 			// TODO: Could switch to using blobby shadow in this case
 			lightPos.Init(FLT_MAX, FLT_MAX, FLT_MAX);
+			if (pEnt)
+			{
+				pEnt->m_ShadowAlphaFractions[nthShadow] = 1;
+			}
+		}
+		else if (pEnt)
+		{
+			pEnt->m_ShadowAlphaFractions[nthShadow] = relativeBrightness;
 		}
 	}
-
-	// NEO NOTE DG: Comparing the origin to the last origin isnt viable because prediction(?)
-	// makes players never still. lets check the speed to see if they are moving
-	Vector delta = origin - shadow.m_LastOrigin;
-	float speed = delta.Length() / gpGlobals->frametime;
-	float normalisedSpeed = clamp( speed / r_worldlight_lerpmaxobjectvel.GetFloat(), 0.0f, 0.5f);
 
 	if (shadow.m_LightPosLerp == FLT_MAX)	// First light pos ever, just init
 	{
@@ -4365,12 +4473,9 @@ void CClientShadowMgr::UpdateShadowDirectionFromLocalLightSource(ClientShadowHan
 	}
 	else if (shadow.m_LightPosLerp < 1.0f)
 	{
-		// We're in the middle of a lerp from current to target light. Finish it if they are moving.
-		if (speed > 20.0f)
-		{
-			shadow.m_LightPosLerp += gpGlobals->frametime * normalisedSpeed;
-			shadow.m_LightPosLerp = clamp(shadow.m_LightPosLerp, 0.0f, 1.0f);
-		}
+		// We're in the middle of a lerp from current to target light. Finish it.
+		shadow.m_LightPosLerp += gpGlobals->frametime * 1.0f / r_worldlight_lerptime.GetFloat();
+		shadow.m_LightPosLerp = clamp(shadow.m_LightPosLerp, 0.0f, 1.0f);
 
 		Vector currLightPos(shadow.m_CurrentLightPos);
 		Vector targetLightPos(shadow.m_TargetLightPos);
@@ -4407,11 +4512,75 @@ void CClientShadowMgr::UpdateShadowDirectionFromLocalLightSource(ClientShadowHan
 		}
 		else
 #endif
+		bool swapShadows = false;
 		{
-			lightPos = Lerp(shadow.m_LightPosLerp, currLightPos, targetLightPos);
+			for (int i = 0; !swapShadows && i < otherShadows.Count(); ++i)
+			{
+				ClientShadow_t* otherShadow = otherShadows[i];
+				constexpr int ulps = 10;
+				swapShadows = AlmostEqual(shadow.m_TargetLightPos, otherShadow->m_CurrentLightPos, ulps) &&
+					AlmostEqual(otherShadow->m_TargetLightPos, shadow.m_CurrentLightPos, ulps);
+
+				if (swapShadows)
+				{
+					std::swap(shadow.m_CurrentLightPos, otherShadow->m_CurrentLightPos);
+					shadow.m_LightPosLerp = 1;
+					otherShadow->m_LightPosLerp = 1;
+					DevMsg("!! Swap! %d\n", gpGlobals->tickcount);
+				}
+				else
+				{
+					constexpr auto isInfOrNan = [](const Vector& v)->bool {
+						for (int i = 0; i < 3; ++i) {
+							if (std::isinf(v[i]) || std::isnan(v[i]))
+								return true;
+						}
+						return false;
+					};
+					constexpr auto isShadowInfOrNan = [](const ClientShadow_t& s)->bool {
+						return isInfOrNan(s.m_CurrentLightPos) || isInfOrNan(s.m_TargetLightPos);
+					};
+
+					constexpr auto isRidiculouslyLarge = [](const ClientShadow_t& s)->bool {
+						constexpr auto limit = 10000;
+						return s.m_CurrentLightPos.IsLengthGreaterThan(limit) ||
+							s.m_TargetLightPos.IsLengthGreaterThan(limit);
+					};
+
+					if (!isShadowInfOrNan(shadow) && !isShadowInfOrNan(*otherShadow))
+					{
+						if (!isRidiculouslyLarge(shadow) && !isRidiculouslyLarge(*otherShadow))
+						{
+							DevMsg("%f %f %f vs %f %f %f && %f %f %f vs %f %f %f\n",
+								shadow.m_TargetLightPos.x, shadow.m_TargetLightPos.y, shadow.m_TargetLightPos.z,
+								otherShadow->m_CurrentLightPos.x, otherShadow->m_CurrentLightPos.y, otherShadow->m_CurrentLightPos.z,
+
+								otherShadow->m_TargetLightPos.x, otherShadow->m_TargetLightPos.y, otherShadow->m_TargetLightPos.z,
+								shadow.m_CurrentLightPos.x, shadow.m_CurrentLightPos.y, shadow.m_CurrentLightPos.z);
+						}
+						else
+						{
+							DevMsg("Too large\n");
+						}
+					}
+					else
+					{
+						DevMsg("Inf or NaN\n");
+					}
+				}
+			}
+
+			if (swapShadows)
+			{
+				lightPos = targetLightPos;
+			}
+			else
+			{
+				lightPos = Lerp(shadow.m_LightPosLerp, currLightPos, targetLightPos);
+			}
 		}
 
-		if (shadow.m_LightPosLerp >= 1.0f)
+		if (!swapShadows && shadow.m_LightPosLerp >= 1.0f)
 		{
 			shadow.m_CurrentLightPos = shadow.m_TargetLightPos;
 		}
@@ -4446,7 +4615,7 @@ void CClientShadowMgr::UpdateShadowDirectionFromLocalLightSource(ClientShadowHan
 
 	if (r_worldlight_debug.GetBool())
 	{
-		NDebugOverlay::Line(lightPos, objectCenter, 255, 255, 0, false, 0.0f);
+		NDebugOverlay::Line(lightPos, origin, 255, 255, 0, false, 0.0f);
 	}
 }
 

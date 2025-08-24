@@ -25,6 +25,10 @@
 #include "filesystem.h"
 #include "worldlight.h"
 
+#ifdef NEO
+#include <utility>
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -175,13 +179,34 @@ void CWorldLights::LevelInitPreEntity()
 	DevMsg("CWorldLights: Load successful (%d lights at 0x%p)\n", m_nWorldLights, m_pWorldLights);
 }
 
+#ifdef NEO
+// Finds the nth brightest light source at a point, zero-indexed.
+// Returns boolean of whether such a light source was found.
+// Passes the light position, brightness, and relative brightness by reference.
+// "relativeBrightness" is the fraction of the output vecLightBrightness's squared magnitude
+// in relation to the (n-1)th squared magnitude, or 1.0 if n equals 0 or (n-1)th magnitude equals 0.
+// Out variable contents are indeterminate if the return value is false.
+bool CWorldLights::GetNthBrightestLightSource(int n, const IClientRenderable* pRenderable, const Vector& vecPosition, Vector& vecLightPos, Vector& vecLightBrightness,
+	vec_t& relativeBrightness)
+#else
 //-----------------------------------------------------------------------------
 // Purpose: Find the brightest light source at a point
 //-----------------------------------------------------------------------------
 bool CWorldLights::GetBrightestLightSource(const Vector& vecPosition, Vector& vecLightPos, Vector& vecLightBrightness)
+#endif
 {
 	if (!m_nWorldLights || !m_pWorldLights)
 		return false;
+
+#ifdef NEO
+	Assert(pRenderable);
+
+	if (n >= m_nWorldLights || n < 0)
+	{
+		Assert(n >= 0);
+		return false;
+	}
+#endif
 
 	// Default light position and brightness to zero
 	vecLightBrightness.Init();
@@ -194,6 +219,12 @@ bool CWorldLights::GetBrightestLightSource(const Vector& vecPosition, Vector& ve
 	// Get the PVS at our position
 	byte* pvs = new byte[nPVSSize];
 	g_pEngineServer->GetPVSForCluster(nCluster, nPVSSize, pvs);
+
+#ifdef NEO
+	// Allocating n+2 because we want 1 more for relative brightness comparisons,
+	// and one extra to prune/grow the vector without reallocations.
+	CUtlVector<std::pair<Vector, Vector>> brightest(0, n + 2);
+#endif
 
 	// Iterate through all the worldlights
 	for (int i = 0; i < m_nWorldLights; ++i)
@@ -265,11 +296,20 @@ bool CWorldLights::GetBrightestLightSource(const Vector& vecPosition, Vector& ve
 		Vector vecIntensity = light->intensity * flRatio;
 
 		// Is this light more intense than the one we already found?
+#ifdef NEO
+		if (brightest.Count() > n+1)
+		{
+			const auto& dimmestBrightness = brightest.Tail().second;
+			if (vecIntensity.LengthSqr() <= dimmestBrightness.LengthSqr())
+				continue;
+		}
+#else
 		if (vecIntensity.LengthSqr() <= vecLightBrightness.LengthSqr())
 		{
 			//engine->Con_NPrintf( i, "%d: too dim", i );
 			continue;
 		}
+#endif
 
 		// Can we see the light?
 		trace_t tr;
@@ -282,8 +322,15 @@ bool CWorldLights::GetBrightestLightSource(const Vector& vecPosition, Vector& ve
 			continue;
 		}
 
+#ifdef NEO
+		brightest.AddToTail(std::make_pair(light->origin, vecIntensity));
+		brightest.SortPredicate([](const auto& l, const auto& r)->bool { return r.second.LengthSqr() < l.second.LengthSqr(); });
+		if (brightest.Count() > n + 2)
+			brightest.SetCountNonDestructively(n + 2);
+#else
 		vecLightPos = light->origin;
 		vecLightBrightness = vecIntensity;
+#endif
 
 		//engine->Con_NPrintf( i, "%d: set (%.2f)", i, vecIntensity.Length() );
 	}
@@ -291,6 +338,36 @@ bool CWorldLights::GetBrightestLightSource(const Vector& vecPosition, Vector& ve
 	delete[] pvs;
 
 	//engine->Con_NPrintf( m_nWorldLights, "result: %d", !vecLightBrightness.IsZero() );
+#ifdef NEO
+	if (brightest.Count() - 1 < n)
+		return false;
+
+	int totalShadows;
+	for (totalShadows = 0;; ++totalShadows)
+	{
+		const auto s = pRenderable->GetShadowHandle(totalShadows);
+		if (s == CLIENTSHADOW_OUT_OF_RANGE)
+			break;
+		if (s == CLIENTSHADOW_INVALID_HANDLE)
+			continue;
+		continue;
+	}
+	if (totalShadows == 0)
+	{
+		Assert(false);
+		return false;
+	}
+
+	const auto& res = brightest.Element(n);
+	vecLightPos = res.first;
+	vecLightBrightness = res.second / totalShadows;
+
+	Assert(
+		vecLightBrightness.IsZero(0) ||
+		vecLightBrightness.IsLengthGreaterThan(0) ||
+		vecLightBrightness.IsLengthLessThan(1) ||
+		vecLightBrightness.LengthSqr() == 1);
+#endif
 	return !vecLightBrightness.IsZero();
 }
 
