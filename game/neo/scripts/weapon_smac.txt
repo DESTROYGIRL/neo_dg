@@ -40,7 +40,7 @@ WeaponData
 	"VMAimFov"		"45.0"
 	"VMAimOffsetForward"	"15.0"
 	"VMAimOffsetRight"	"6.5"	
-	"VMAimOffsetUp"		"6.0"
+	"VMAimOffsetUp"		"0.0"
 	
 	"AimFov"		"50.0"	//40
     
@@ -57,7 +57,7 @@ WeaponData
 		"fov"		"45"
 		"forward"	"15"
 		"right"		"6.5"
-		"up"		"6"
+		"up"		"0"
 	}
 	
 	"AimOffset"
@@ -65,7 +65,7 @@ WeaponData
 		"fov"		"45"
 		"forward"	"15"
 		"right"		"6.5"
-		"up"		"6"
+		"up"		"0"
 	}
 
 	// Sounds for the weapon. There is a max of 16 sounds per category (i.e. max 16 "single_shot" sounds)
