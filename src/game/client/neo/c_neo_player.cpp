@@ -492,6 +492,9 @@ void C_NEO_Player::CheckThermOpticButtons()
 
 void C_NEO_Player::CheckVisionButtons()
 {
+	if (m_iNeoClass == NEO_CLASS_VIP)
+		return;
+
 	if (!m_bIsAllowedToToggleVision)
 	{
 		return;

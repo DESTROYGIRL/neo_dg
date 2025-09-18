@@ -370,11 +370,11 @@ void CNEOHud_RoundState::UpdateStateForNeoHudElementDraw()
 		{
 			if (NEORules()->GhostExists())
 			{
-				V_sprintf_safe(szGameTypeDescription, "HVT down, secure the Ghost\n");
+				V_sprintf_safe(szGameTypeDescription, "VIP down, secure the Ghost\n");
 			}
 			else
 			{
-				V_sprintf_safe(szGameTypeDescription, "Eliminate the HVT\n");
+				V_sprintf_safe(szGameTypeDescription, "Eliminate the VIP\n");
 			}
 		}
 		break;

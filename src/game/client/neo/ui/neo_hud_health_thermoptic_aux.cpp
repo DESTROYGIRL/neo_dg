@@ -126,7 +126,7 @@ void CNEOHud_HTA::DrawHTA() const
 	const float thermopticPercent = player->CloakPower_CurrentVisualPercentage();
 	const int aux = player->m_HL2Local.m_flSuitPower;
 	const bool playerIsNotSupport = (player->GetClass() != NEO_CLASS_SUPPORT);
-	const bool playerIsNotJuggernaut = (player->GetClass() != NEO_CLASS_JUGGERNAUT);
+	const bool playerIsNotJuggernautOrVIP = (player->GetClass() != NEO_CLASS_JUGGERNAUT && player->GetClass() != NEO_CLASS_VIP);
 
 	V_sprintf_safe(value_Integrity, "%d", displayedHealth);
 	if (playerIsNotSupport)
@@ -154,7 +154,7 @@ void CNEOHud_HTA::DrawHTA() const
 	surface()->DrawPrintText(L"INTEGRITY", 9);
 	if (playerIsNotSupport)
 	{
-		if (playerIsNotJuggernaut)
+		if (playerIsNotJuggernautOrVIP)
 		{
 			surface()->DrawSetTextColor(m_camoTextColor);
 			surface()->DrawSetTextPos(camotext_xpos + xpos, camotext_ypos + ypos);
@@ -172,7 +172,7 @@ void CNEOHud_HTA::DrawHTA() const
 	surface()->DrawPrintText(unicodeValue_Integrity, valLen_Integrity);
 	if (playerIsNotSupport)
 	{
-		if (playerIsNotJuggernaut)
+		if (playerIsNotJuggernautOrVIP)
 		{
 			surface()->DrawSetTextColor(m_camoTextColor);
 			surface()->GetTextSize(m_hFont, unicodeValue_ThermOptic, fontWidth, fontHeight);
@@ -195,7 +195,7 @@ void CNEOHud_HTA::DrawHTA() const
 
 	if (playerIsNotSupport)
 	{
-		if (playerIsNotJuggernaut)
+		if (playerIsNotJuggernautOrVIP)
 		{
 			// ThermOptic progress bar
 			surface()->DrawSetColor(m_camoColor);

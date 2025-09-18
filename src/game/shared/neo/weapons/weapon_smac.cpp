@@ -39,5 +39,5 @@ CWeaponSMAC::CWeaponSMAC()
 
 bool CWeaponSMAC::CanBePickedUpByClass(int classId)
 {
-	return classId != NEO_CLASS_JUGGERNAUT;
+	return classId == NEO_CLASS_VIP;
 }

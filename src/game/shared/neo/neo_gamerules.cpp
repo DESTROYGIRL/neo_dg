@@ -1327,7 +1327,7 @@ void CNEORules::Think(void)
 		{
 			if (sv_neo_vip_ctg_on_death.GetBool())
 			{
-				UTIL_CenterPrintAll("- HVT DOWN - RECOVER THE GHOST -\n");
+				UTIL_CenterPrintAll("- VIP DOWN - RECOVER THE GHOST -\n");
 				SpawnTheGhost();
 			}
 			else
@@ -1346,7 +1346,7 @@ void CNEORules::Think(void)
 		{
 			if (sv_neo_vip_ctg_on_death.GetBool())
 			{
-				UTIL_CenterPrintAll("- HVT DOWN - RECOVER THE GHOST -\n");
+				UTIL_CenterPrintAll("- VIP DOWN - RECOVER THE GHOST -\n");
 				SpawnTheGhost(&m_pVIP->GetAbsOrigin());
 			}
 			else
