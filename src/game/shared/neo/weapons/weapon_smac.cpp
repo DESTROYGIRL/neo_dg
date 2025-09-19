@@ -7,12 +7,16 @@
 IMPLEMENT_NETWORKCLASS_ALIASED(WeaponSMAC, DT_WeaponSMAC)
 
 BEGIN_NETWORK_TABLE(CWeaponSMAC, DT_WeaponSMAC)
-	DEFINE_NEO_BASE_WEP_NETWORK_TABLE
+#ifdef CLIENT_DLL
+	RecvPropBool(RECVINFO(m_bExplosiveMode))
+#else
+	SendPropBool(SENDINFO(m_bExplosiveMode))
+#endif
 END_NETWORK_TABLE()
 
 #ifdef CLIENT_DLL
 BEGIN_PREDICTION_DATA(CWeaponSMAC)
-	DEFINE_NEO_BASE_WEP_PREDICTION
+	DEFINE_PRED_FIELD(m_bExplosiveMode, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE),
 END_PREDICTION_DATA()
 #endif
 
@@ -24,6 +28,8 @@ PRECACHE_WEAPON_REGISTER(weapon_smac);
 
 CWeaponSMAC::CWeaponSMAC()
 {
+	m_bExplosiveMode = false;
+
 	m_flSoonestAttack = gpGlobals->curtime;
 	m_flAccuracyPenalty = 0;
 
@@ -35,6 +41,48 @@ CWeaponSMAC::CWeaponSMAC()
 		"smacrx",
 		"smacry",
 	};
+}
+
+void CWeaponSMAC::ItemPostFrame(void)
+{
+	BaseClass::ItemPostFrame();
+}
+
+void CWeaponSMAC::PrimaryAttack(void)
+{
+	if (!m_bExplosiveMode)
+	{
+		BaseClass::PrimaryAttack();
+	}
+	else
+	{
+		SendWeaponAnim(ACT_VM_THROW);
+
+		auto pOwner = ToNEOPlayer(GetOwner());
+		pOwner->DoAnimationEvent(PLAYERANIMEVENT_ATTACK_GRENADE);
+
+		m_flNextPrimaryAttack = gpGlobals->curtime + SequenceDuration();
+
+		Drop(vec3_origin);
+	}
+}
+
+void CWeaponSMAC::SecondaryAttack(void)
+{
+	if (ShootingIsPrevented() || m_bExplosiveMode)
+	{
+		return;
+	}
+
+	//WeaponSound(SPECIAL1);
+	SendWeaponAnim(ACT_VM_CHANGEMODE);
+
+	auto pOwner = ToNEOPlayer(GetOwner());
+	pOwner->DoAnimationEvent(PLAYERANIMEVENT_RELOAD);
+
+	pOwner->m_flNextAttack = gpGlobals->curtime + SequenceDuration();
+
+	m_bExplosiveMode = true;
 }
 
 bool CWeaponSMAC::CanBePickedUpByClass(int classId)

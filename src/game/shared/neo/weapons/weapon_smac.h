@@ -39,8 +39,16 @@ public:
 	virtual float GetSpeedScale(void) const OVERRIDE { return 0.8f; }
 
 	bool CanBePickedUpByClass(int classId) OVERRIDE;
+
+	void ItemPostFrame(void);
+	void PrimaryAttack(void);
+	void SecondaryAttack(void);
+
 protected:
 	virtual float GetFastestDryRefireTime() const OVERRIDE { return 0.2f; }
+
+private:
+	CNetworkVar(bool, m_bExplosiveMode);
 
 private:
 	CWeaponSMAC(const CWeaponSMAC& other);
