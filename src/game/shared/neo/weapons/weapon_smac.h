@@ -40,15 +40,23 @@ public:
 
 	bool CanBePickedUpByClass(int classId) OVERRIDE;
 
-	void ItemPostFrame(void);
-	void PrimaryAttack(void);
-	void SecondaryAttack(void);
+	void Equip(CBaseCombatCharacter *pNewOwner) override;
+	virtual void ItemPostFrame(void) override;
+	virtual void PrimaryAttack(void) override;
+	virtual void SecondaryAttack(void) override;
+
+	bool InExplosiveMode() { return m_bExplosiveMode;  }
+	void Explode();
 
 protected:
 	virtual float GetFastestDryRefireTime() const OVERRIDE { return 0.2f; }
 
 private:
 	CNetworkVar(bool, m_bExplosiveMode);
+
+#ifdef GAME_DLL
+	CBaseCombatCharacter *m_pLastOwner = nullptr;
+#endif
 
 private:
 	CWeaponSMAC(const CWeaponSMAC& other);

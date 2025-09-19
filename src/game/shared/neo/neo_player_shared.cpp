@@ -3,6 +3,7 @@
 
 #include "in_buttons.h"
 #include "neo_gamerules.h"
+#include "weapons/weapon_smac.h"
 
 #include "tier0/valve_minmax_off.h"
 #include <tier3/tier3.h>
@@ -46,6 +47,13 @@ bool IsAllowedToZoom(CNEOBaseCombatWeapon *pWep)
 	if (!pWep || pWep->m_bInReload || pWep->GetRoundBeingChambered())
 	{
 		return false;
+	}
+
+	if (pWep->GetNeoWepBits() & NEO_WEP_SMAC)
+	{
+		CWeaponSMAC *smac = static_cast<CWeaponSMAC*>(pWep);
+
+		return !smac->InExplosiveMode();
 	}
 
 	// These weapons are not allowed to be zoomed in with.
