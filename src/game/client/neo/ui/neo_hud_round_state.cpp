@@ -274,11 +274,11 @@ void CNEOHud_RoundState::UpdateStateForNeoHudElementDraw()
 			{
 				if (NEORules()->GhostExists())
 				{
-					m_pWszStatusUnicode = L"HVT down, secure the Ghost\n";
+					m_pWszStatusUnicode = L"VIP down, secure the Ghost\n";
 				}
 				else
 				{
-					m_pWszStatusUnicode = L"Eliminate the HVT\n";
+					m_pWszStatusUnicode = L"Eliminate the VIP\n";
 				}
 			}
 			break;
