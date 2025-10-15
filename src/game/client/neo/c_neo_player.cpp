@@ -77,7 +77,7 @@ IMPLEMENT_CLIENTCLASS_DT(C_NEO_Player, DT_NEO_Player, CNEO_Player)
 	RecvPropInt(RECVINFO(m_iLoadoutWepChoice)),
 	RecvPropInt(RECVINFO(m_iNextSpawnClassChoice)),
 	RecvPropInt(RECVINFO(m_bInLean)),
-	RecvPropEHandle(RECVINFO(m_hDroppedJuggernautItem)),
+	RecvPropEHandle(RECVINFO(m_hServerRagdoll)),
 
 	RecvPropBool(RECVINFO(m_bInThermOpticCamo)),
 	RecvPropBool(RECVINFO(m_bLastTickInThermOpticCamo)),
@@ -515,6 +515,7 @@ void C_NEO_Player::CheckVisionButtons()
 				C_RecipientFilter filter;
 				filter.AddRecipient(this);
 				filter.MakeReliable();
+				filter.UsePredictionRules();
 
 				EmitSound_t params;
 				params.m_bEmitCloseCaption = false;
@@ -836,7 +837,6 @@ void C_NEO_Player::PlayStepSound( Vector &vecOrigin,
 	BaseClass::PlayStepSound(vecOrigin, psurface, fvol, force);
 }
 
-extern ConVar neo_ghost_bhopping;
 void C_NEO_Player::CalculateSpeed(void)
 {
 	float speed = GetNormSpeed();
@@ -880,17 +880,6 @@ void C_NEO_Player::CalculateSpeed(void)
 		speed = MIN(GetFlags() & FL_DUCKING ? NEO_CROUCH_WALK_SPEED : NEO_WALK_SPEED, speed);
 	}
 
-	Vector absoluteVelocity = GetAbsVelocity();
-	absoluteVelocity.z = 0.f;
-	float currentSpeed = absoluteVelocity.Length();
-
-	if (((!neo_ghost_bhopping.GetBool() && m_bCarryingGhost) || m_iNeoClass == NEO_CLASS_JUGGERNAUT) && GetMoveType() == MOVETYPE_WALK && currentSpeed > speed)
-	{
-		float overSpeed = currentSpeed - speed;
-		absoluteVelocity.NormalizeInPlace();
-		absoluteVelocity *= -overSpeed;
-		ApplyAbsVelocityImpulse(absoluteVelocity);
-	}
 	speed = MAX(speed, 55);
 
 	// Slowdown after jumping
@@ -1133,6 +1122,12 @@ void C_NEO_Player::PreThink( void )
 			// Disable client side glow effects of all players
 			glow_outline_effect_enable.SetValue(false);
 #endif // GLOWS_ENABLE
+
+			// Reset any player explosion/shock effects
+			// NEO NOTE (Rain): The game already does this at CBasePlayer::Spawn, but that one's server-side,
+			// so it could arrive too late.
+			CLocalPlayerFilter filter;
+			enginesound->SetPlayerDSP(filter, 0, true);
 		}
 	}
 	else
@@ -1358,21 +1353,31 @@ void C_NEO_Player::PostThink(void)
 
 void C_NEO_Player::CalcDeathCamView(Vector &eyeOrigin, QAngle &eyeAngles, float &fov)
 {
-	auto* pRagdoll = static_cast<C_HL2MPRagdoll*>(m_hRagdoll.Get());
-	if (pRagdoll && GetClass() != NEO_CLASS_JUGGERNAUT)
+	if (GetClass() != NEO_CLASS_JUGGERNAUT)
 	{
-		// First person death cam
-		pRagdoll->GetAttachment(pRagdoll->LookupAttachment("eyes"), eyeOrigin, eyeAngles);
-		Vector vForward;
-		AngleVectors(eyeAngles, &vForward);
-		fov = GetFOV();
+		if (auto* pRagdoll = assert_cast<C_BaseAnimating*>(m_hRagdoll.Get() ? m_hRagdoll.Get() : m_hServerRagdoll.Get()))
+		{
+			pRagdoll->GetAttachment(pRagdoll->LookupAttachment("eyes"), eyeOrigin, eyeAngles);
+
+			int iHeadBone = pRagdoll->LookupBone("ValveBiped.Bip01_Head1");
+			if (iHeadBone != -1)
+			{
+				matrix3x4_t &transform = pRagdoll->GetBoneForWrite(iHeadBone);
+				MatrixScaleByZero(transform);
+			}
+		}
+		else
+		{
+			// Fallback just in-case it somehow doesn't do m_hRagdoll
+			return BaseClass::CalcDeathCamView(eyeOrigin, eyeAngles, fov);
+		}
 	}
-	else if (GetClass() == NEO_CLASS_JUGGERNAUT)
+	else
 	{
 		Vector vTarget = vec3_origin;
-		if (m_hDroppedJuggernautItem)
+		if (m_hServerRagdoll)
 		{
-			vTarget = m_hDroppedJuggernautItem->WorldSpaceCenter();
+			vTarget = m_hServerRagdoll->WorldSpaceCenter();
 		}
 		else
 		{
@@ -1389,13 +1394,9 @@ void C_NEO_Player::CalcDeathCamView(Vector &eyeOrigin, QAngle &eyeAngles, float 
 		Vector vDir = vTarget - eyeOrigin;
 		VectorNormalize(vDir);
 		VectorAngles(vDir, eyeAngles);
-		fov = GetFOV();
 	}
-	else
-	{
-		// Fallback just in-case it somehow doesn't do m_hRagdoll
-		BaseClass::CalcDeathCamView(eyeOrigin, eyeAngles, fov);
-	}
+
+	fov = GetFOV();
 }
 
 void C_NEO_Player::TeamChange(int iNewTeam)
@@ -1773,6 +1774,11 @@ bool C_NEO_Player::IsCarryingGhost(void) const
 	return GetNeoWepWithBits(this, NEO_WEP_GHOST) != NULL;
 }
 
+bool C_NEO_Player::IsObjective(void) const
+{
+	return IsCarryingGhost() || GetClass() == NEO_CLASS_VIP || GetClass() == NEO_CLASS_JUGGERNAUT;
+}
+
 const Vector C_NEO_Player::GetPlayerMins(void) const
 {
 	return VEC_DUCK_HULL_MIN_SCALED(this);
@@ -1788,6 +1794,7 @@ void C_NEO_Player::PlayCloakSound(void)
 	C_RecipientFilter filter;
 	filter.AddRecipient(this);
 	filter.MakeReliable();
+	filter.UsePredictionRules();
 
 	static int tocOn = CBaseEntity::PrecacheScriptSound("NeoPlayer.ThermOpticOn");
 	static int tocOff = CBaseEntity::PrecacheScriptSound("NeoPlayer.ThermOpticOff");
