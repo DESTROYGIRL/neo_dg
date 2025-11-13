@@ -55,6 +55,8 @@
 #include "c_user_message_register.h"
 #include "neo_player_shared.h"
 
+#include "c_playerresource.h"
+
 // Don't alias here
 #if defined( CNEO_Player )
 #undef CNEO_Player	
@@ -143,6 +145,7 @@ ConVar cl_neo_streamermode_autodetect_obs("cl_neo_streamermode_autodetect_obs", 
 
 extern ConVar sv_neo_clantag_allow;
 extern ConVar sv_neo_dev_test_clantag;
+extern ConVar sv_neo_wep_dmg_modifier;
 
 class NeoLoadoutMenu_Cb : public ICommandCallback
 {
@@ -555,7 +558,7 @@ int C_NEO_Player::GetAttackersScores(const int attackerIdx) const
 	{
 		return m_rfAttackersScores.Get(attackerIdx);
 	}
-	return min(m_rfAttackersScores.Get(attackerIdx), 100);
+	return m_rfAttackersScores.Get(attackerIdx);
 }
 
 const char *C_NEO_Player::GetNeoClantag() const
@@ -631,16 +634,18 @@ int C_NEO_Player::GetAttackerHits(const int attackerIdx) const
 	return m_rfAttackersHits.Get(attackerIdx);
 }
 
-constexpr float invertedDamageResistanceModifier[NEO_CLASS__ENUM_COUNT] = {
-	1 / NEO_RECON_DAMAGE_MODIFIER,
-	1 / NEO_ASSAULT_DAMAGE_MODIFIER,
-	1 / NEO_SUPPORT_DAMAGE_MODIFIER,
-	1 / NEO_ASSAULT_DAMAGE_MODIFIER
-};
+ConVar cl_neo_hud_health_mode("cl_neo_hud_health_mode", "1", FCVAR_ARCHIVE,
+	"Health display mode. 0 = Percent, 1 = Hit points, 2 = Effective hit points", true, 0, true, 2);
 
-int C_NEO_Player::GetDisplayedHealth(bool asPercent) const
+// 0 = Percent, 1 = Hit points, 2 = Effective hit points
+int C_NEO_Player::GetDisplayedHealth(int mode) const
 {
-	return asPercent ? GetHealth() : GetHealth() * invertedDamageResistanceModifier[m_iNeoClass];
+	return g_PR ? g_PR->GetDisplayedHealth(entindex(), mode) : GetHealth();
+}
+
+int C_NEO_Player::GetMaxHealth() const
+{
+	return g_PR ? g_PR->GetMaxHealth(entindex()) : 1;
 }
 
 extern ConVar mat_neo_toc_test;
@@ -848,7 +853,12 @@ void C_NEO_Player::CalculateSpeed(void)
 
 	if (GetFlags() & FL_DUCKING)
 	{
-		speed *= NEO_CROUCH_MODIFIER;
+		speed *= NEO_CROUCH_WALK_MODIFIER;
+	}
+
+	if (m_nButtons & IN_WALK)
+	{
+		speed *= NEO_CROUCH_WALK_MODIFIER;
 	}
 
 	if (IsSprinting())
@@ -873,11 +883,6 @@ void C_NEO_Player::CalculateSpeed(void)
 	if (IsInAim())
 	{
 		speed *= NEO_AIM_MODIFIER;
-	}
-
-	if (m_nButtons & IN_WALK)
-	{
-		speed = MIN(GetFlags() & FL_DUCKING ? NEO_CROUCH_WALK_SPEED : NEO_WALK_SPEED, speed);
 	}
 
 	speed = MAX(speed, 55);
@@ -1261,7 +1266,7 @@ void C_NEO_Player::PostThink(void)
 				SetObserverMode(OBS_MODE_DEATHCAM);
 				// Fade out 8s to blackout + 2s full blackout
 				ScreenFade_t sfade{
-					.duration = static_cast<unsigned short>(static_cast<float>(1<<SCREENFADE_FRACBITS) * 8.0f),
+					.duration = static_cast<unsigned short>(static_cast<float>(1<<SCREENFADE_FRACBITS) * (DEATH_ANIMATION_TIME - 2.0f)),
 					.holdTime = static_cast<unsigned short>(static_cast<float>(1<<SCREENFADE_FRACBITS) * 2.0f),
 					.fadeFlags = FFADE_OUT|FFADE_PURGE,
 					.r = 0,
@@ -1281,10 +1286,10 @@ void C_NEO_Player::PostThink(void)
 			}
 		}
 
-		if (IsLocalPlayer() && GetObserverMode() == OBS_MODE_DEATHCAM && gpGlobals->curtime >= (GetDeathTime() + 10.0f))
+		auto observerMode = GetObserverMode();
+		if (IsLocalPlayer() && observerMode == OBS_MODE_DEATHCAM && gpGlobals->curtime >= (GetDeathTime() + DEATH_ANIMATION_TIME))
 		{
-			// Deathcam -> None so you view your own body for a bit before proper spec
-			m_iObserverMode = OBS_MODE_NONE;
+			SetObserverMode(OBS_MODE_IN_EYE);
 			g_ClientVirtualReality.AlignTorsoAndViewToWeapon();
 
 			// Fade in 2s from blackout
@@ -1299,6 +1304,20 @@ void C_NEO_Player::PostThink(void)
 			};
 			vieweffects->Fade(sfade);
 		}
+
+		if (observerMode == OBS_MODE_CHASE || observerMode == OBS_MODE_IN_EYE)
+		{
+			auto target = GetObserverTarget();
+			if (!IsValidObserverTarget(target))
+			{
+				auto nextTarget = FindNextObserverTarget(false);
+				if (nextTarget && nextTarget != target)
+				{
+					SetObserverTarget(nextTarget);
+				}
+			}
+		}
+
 		return;
 	}
 	else
@@ -1669,7 +1688,7 @@ float C_NEO_Player::GetCrouchSpeed(void) const
 	case NEO_CLASS_JUGGERNAUT:
 		return NEO_JUGGERNAUT_CROUCH_SPEED;
 	default:
-		return (NEO_BASE_SPEED * NEO_CROUCH_MODIFIER);
+		return (NEO_BASE_SPEED * NEO_CROUCH_WALK_MODIFIER);
 	}
 }
 
@@ -1840,8 +1859,6 @@ void C_NEO_Player::PreDataUpdate(DataUpdateType_t updateType)
 
 	BaseClass::PreDataUpdate(updateType);
 }
-
-extern ConVar sv_neo_wep_dmg_modifier;
 
 // NEO NOTE (Rain): doesn't seem to be implemented at all clientside?
 // Don't need to do this, unless we want it for prediction with proper implementation later.

@@ -259,6 +259,12 @@ void CNEOBaseCombatWeapon::Spawn()
 
 #ifdef GAME_DLL
 	AddSpawnFlags(SF_NORESPAWN);
+
+	if (NEORules()->IsCyberspace())
+	{
+		SetRenderMode(kRenderTransTexture);
+		m_nRenderFX = kRenderFxDistort;
+	}
 #else
 	SetNextClientThink(gpGlobals->curtime + TICK_INTERVAL);
 #endif // GAME_DLL
@@ -1142,7 +1148,20 @@ bool CNEOBaseCombatWeapon::ShouldDraw(void)
 	// No supernatural gunowners allowed here
 	if (!pOwner->IsAlive())
 	{
-		Assert(false);
+#if DEBUG
+		static int deathTicks[MAX_PLAYERS_ARRAY_SAFE]{};
+		if (!*deathTicks)
+			for (int i = 0; i < ARRAYSIZE(deathTicks); ++i) deathTicks[i] = -1;
+		const int ownerIdx = pOwner->entindex();
+		Assert(pOwner->IsPlayer()); // player index guaranteed within array range
+		const int deathTick = deathTicks[ownerIdx];
+		if (deathTick != -1)
+		{
+			int tickDelta = gpGlobals->tickcount - deathTick;
+			AssertMsg(tickDelta != 1, "Owner has been dead for two consecutive ticks!!");
+		}
+		deathTicks[ownerIdx] = gpGlobals->tickcount;
+#endif
 		return false;
 	}
 

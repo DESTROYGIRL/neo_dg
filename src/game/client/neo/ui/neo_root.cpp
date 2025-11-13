@@ -336,18 +336,16 @@ void CNeoRootInput::OnThink()
 	}
 }
 
-constexpr WidgetInfo BTNS_INFO[BTNS_TOTAL] = {
-	{ "#GameUI_GameMenu_ResumeGame", false, "ResumeGame", true, STATE__TOTAL, FLAG_SHOWINGAME },
-	{ "#GameUI_GameMenu_FindServers", false, nullptr, true, STATE_SERVERBROWSER, FLAG_SHOWINGAME | FLAG_SHOWINMAIN },
-	{ "#GameUI_GameMenu_CreateServer", false, nullptr, true, STATE_NEWGAME, FLAG_SHOWINGAME | FLAG_SHOWINMAIN },
-	{ "#GameUI_GameMenu_Disconnect", false, "Disconnect", true, STATE__TOTAL, FLAG_SHOWINGAME },
-	{ "#GameUI_GameMenu_PlayerList", false, nullptr, true, STATE_PLAYERLIST, FLAG_SHOWINGAME },
-	{ "", true, nullptr, true, STATE__TOTAL, FLAG_SHOWINMAIN },
-	{ "#GameUI_GameMenu_Tutorial", false, "sv_use_steam_networking 0; map " TUTORIAL_MAP_CLASSES, false, STATE__TOTAL, FLAG_SHOWINMAIN},
-	{ "#GameUI_GameMenu_FiringRange", false, "sv_use_steam_networking 0; map " TUTORIAL_MAP_SHOOTING, false, STATE__TOTAL, FLAG_SHOWINMAIN},
-	{ "", true, nullptr, true, STATE__TOTAL, FLAG_SHOWINGAME | FLAG_SHOWINMAIN },
-	{ "#GameUI_GameMenu_Options", false, nullptr, true, STATE_SETTINGS, FLAG_SHOWINGAME | FLAG_SHOWINMAIN },
-	{ "#GameUI_GameMenu_Quit", false, nullptr, true, STATE_QUIT, FLAG_SHOWINGAME | FLAG_SHOWINMAIN },
+constexpr const char *BTNS_LOCALIZE[MMBTN__TOTAL] = {
+	"#GameUI_GameMenu_ResumeGame",
+	"#GameUI_GameMenu_FindServers",
+	"#GameUI_GameMenu_CreateServer",
+	"#GameUI_GameMenu_Disconnect",
+	"#GameUI_GameMenu_PlayerList",
+	"#GameUI_GameMenu_Tutorial",
+	"#GameUI_GameMenu_FiringRange",
+	"#GameUI_GameMenu_Options",
+	"#GameUI_GameMenu_Quit",
 };
 
 CNeoRoot::CNeoRoot(VPANEL parent)
@@ -364,18 +362,20 @@ CNeoRoot::CNeoRoot(VPANEL parent)
 		enginevgui->GetPanel(PANEL_CLIENTDLL), "resource/ClientScheme.res", "ClientScheme");
 	SetScheme(neoscheme);
 
-	for (int i = 0; i < BTNS_TOTAL; ++i)
+	for (int i = 0; i < MMBTN__TOTAL; ++i)
 	{
-		const char *label = BTNS_INFO[i].label;
-		if (wchar_t *localizedWszStr = g_pVGuiLocalize->Find(label))
+		const char *pszLocalizeKey = BTNS_LOCALIZE[i];
+		wchar_t *localizedWszStr = g_pVGuiLocalize->Find(pszLocalizeKey);
+		Assert(localizedWszStr);
+		if (localizedWszStr)
 		{
-			V_wcsncpy(m_wszDispBtnTexts[i], localizedWszStr, sizeof(m_wszDispBtnTexts[i]));
+			V_wcsncpy(m_wszCachedTexts[i], localizedWszStr, sizeof(m_wszCachedTexts[i]));
 		}
 		else
 		{
-			g_pVGuiLocalize->ConvertANSIToUnicode(label, m_wszDispBtnTexts[i], sizeof(m_wszDispBtnTexts[i]));
+			Warning("ERROR: Cannot find localized text of %s", pszLocalizeKey);
+			g_pVGuiLocalize->ConvertANSIToUnicode(pszLocalizeKey, m_wszCachedTexts[i], sizeof(m_wszCachedTexts[i]));
 		}
-		m_iWszDispBtnTextsSizes[i] = V_wcslen(m_wszDispBtnTexts[i]);
 	}
 
 	NeoSettingsInit(&m_ns);
@@ -680,6 +680,7 @@ void CNeoRoot::OnMainLoop(const NeoUI::Mode eMode)
 			&CNeoRoot::MainLoopSettings,		// STATE_SETTINGS
 			&CNeoRoot::MainLoopNewGame,			// STATE_NEWGAME
 			&CNeoRoot::MainLoopServerBrowser,	// STATE_SERVERBROWSER
+			&CNeoRoot::MainLoopCredits,			// STATE_CREDITS
 
 			&CNeoRoot::MainLoopMapList,			// STATE_MAPLIST
 			&CNeoRoot::MainLoopServerDetails,	// STATE_SERVERDETAILS
@@ -745,7 +746,7 @@ void CNeoRoot::MainLoopRoot(const MainLoopParam param)
 	const int iMarginHalf = iMargin * 0.5;
 	const int iTitleMarginTop = (param.tall * 0.2);
 	surface()->GetTextSize(g_uiCtx.fonts[NeoUI::FONT_LOGO].hdl, L"n", iTitleNWidth, iTitleNHeight);
-	g_uiCtx.dPanel.wide = (m_iTitleWidth) +iMargin;
+	g_uiCtx.dPanel.wide = (m_iTitleWidth) + iMargin;
 	g_uiCtx.dPanel.tall = param.tall;
 	g_uiCtx.dPanel.x = iBtnPlaceXMid - (m_iTitleWidth * 0.5) + (iTitleNWidth * 1.16) - iMarginHalf;
 	g_uiCtx.dPanel.y = iTitleMarginTop + (2 * iTitleNHeight);
@@ -756,60 +757,58 @@ void CNeoRoot::MainLoopRoot(const MainLoopParam param)
 									g_uiCtx.dPanel.x + g_uiCtx.dPanel.wide, param.tall);
 
 	NeoUI::BeginContext(&g_uiCtx, param.eMode, nullptr, "CtxRoot");
-	NeoUI::BeginSection(NeoUI::SECTIONFLAG_DEFAULTFOCUS);
+	NeoUI::BeginSection(NeoUI::SECTIONFLAG_DEFAULTFOCUS | NeoUI::SECTIONFLAG_PLAYBUTTONSOUNDS);
 	{
 		g_uiCtx.eButtonTextStyle = NeoUI::TEXTSTYLE_CENTER;
-		const int iFlagToMatch = IsInGame() ? FLAG_SHOWINGAME : FLAG_SHOWINMAIN;
-		bool mouseOverButton = false;
-		for (int i = 0; i < BTNS_TOTAL; ++i)
+		const bool bIsInGame = IsInGame();
+		if (bIsInGame && NeoUI::Button(m_wszCachedTexts[MMBTN_RESUME]).bPressed)
 		{
-			const auto btnInfo = BTNS_INFO[i];
-			if (btnInfo.flags & iFlagToMatch)
+			m_state = STATE_ROOT;
+			GetGameUI()->SendMainMenuCommand("ResumeGame");
+		}
+		if (NeoUI::Button(m_wszCachedTexts[MMBTN_FINDSERVER]).bPressed)
+		{
+			m_state = STATE_SERVERBROWSER;
+		}
+		if (NeoUI::Button(m_wszCachedTexts[MMBTN_CREATESERVER]).bPressed)
+		{
+			m_state = STATE_NEWGAME;
+		}
+		if (bIsInGame)
+		{
+			if (NeoUI::Button(m_wszCachedTexts[MMBTN_DISCONNECT]).bPressed)
 			{
-				if (btnInfo.isFake)
-				{
-					NeoUI::Pad();
-					continue;
-				}
-				const auto retBtn = NeoUI::Button(m_wszDispBtnTexts[i]);
-				if (retBtn.bPressed || (i == MMBTN_QUIT && !IsInGame() && NeoUI::BindKeyBack()))
-				{
-					surface()->PlaySound("ui/buttonclickrelease.wav");
-					if (btnInfo.command)
-					{
-						m_state = STATE_ROOT;
-						if (btnInfo.isMainMenuCommand)
-						{
-							GetGameUI()->SendMainMenuCommand(btnInfo.command);
-						}
-						else
-						{
-							engine->ClientCmd(btnInfo.command);
-						}
-					}
-					else if (btnInfo.nextState < STATE__TOTAL)
-					{
-						m_state = btnInfo.nextState;
-						if (m_state == STATE_SETTINGS)
-						{
-							NeoSettingsRestore(&m_ns);
-						}
-					}
-				}
-				if (retBtn.bMouseHover)
-				{
-					mouseOverButton = true;
-					if (i != m_iHoverBtn && param.eMode == NeoUI::MODE_MOUSEMOVED)
-					{ // Sound rollover feedback
-						surface()->PlaySound("ui/buttonrollover.wav");
-						m_iHoverBtn = i;
-					}
-				}
+				m_state = STATE_ROOT;
+				GetGameUI()->SendMainMenuCommand("Disconnect");
+			}
+			if (NeoUI::Button(m_wszCachedTexts[MMBTN_PLAYERLIST]).bPressed)
+			{
+				m_state = STATE_PLAYERLIST;
 			}
 		}
-		if (!mouseOverButton && m_iHoverBtn < BTNS_TOTAL && param.eMode == NeoUI::MODE_MOUSEMOVED)
+		else
 		{
-			m_iHoverBtn = -1;
+			NeoUI::Pad();
+			if (NeoUI::Button(m_wszCachedTexts[MMBTN_TUTORIAL]).bPressed)
+			{
+				m_state = STATE_ROOT;
+				engine->ClientCmd("sv_use_steam_networking 0; map " TUTORIAL_MAP_CLASSES);
+			}
+			if (NeoUI::Button(m_wszCachedTexts[MMBTN_FIRINGRANGE]).bPressed)
+			{
+				m_state = STATE_ROOT;
+				engine->ClientCmd("sv_use_steam_networking 0; map " TUTORIAL_MAP_SHOOTING);
+			}
+		}
+		NeoUI::Pad();
+		if (NeoUI::Button(m_wszCachedTexts[MMBTN_OPTIONS]).bPressed)
+		{
+			m_state = STATE_SETTINGS;
+			NeoSettingsRestore(&m_ns);
+		}
+		if (NeoUI::Button(m_wszCachedTexts[MMBTN_QUIT]).bPressed)
+		{
+			m_state = STATE_QUIT;
 		}
 	}
 	NeoUI::EndSection();
@@ -993,32 +992,24 @@ void CNeoRoot::MainLoopRoot(const MainLoopParam param)
 	NeoUI::EndSection();
 #endif
 	g_uiCtx.dPanel.x = param.wide - 128;
-	g_uiCtx.dPanel.y = param.tall - 48;
+	g_uiCtx.dPanel.y = param.tall - 96;
 	g_uiCtx.dPanel.wide = 128;
-	g_uiCtx.dPanel.tall = 1;
-	NeoUI::BeginSection();
-	g_uiCtx.eButtonTextStyle = NeoUI::TEXTSTYLE_CENTER;
-	const auto musicPlayerBtn = NeoUI::Button(L"Music");
-	if (musicPlayerBtn.bPressed)
-	{
-		surface()->PlaySound("ui/buttonclickrelease.wav");
-		engine->ClientCmd("neo_mp3");
+	g_uiCtx.dPanel.tall = param.tall;
 
-	}
-	if (param.eMode == NeoUI::MODE_MOUSEMOVED)
+	NeoUI::BeginSection(NeoUI::SECTIONFLAG_PLAYBUTTONSOUNDS);
 	{
-		if (musicPlayerBtn.bMouseHover && SMBTN_MP3 != m_iHoverBtn)
-		{ // Sound rollover feedback
-			surface()->PlaySound("ui/buttonrollover.wav");
-			m_iHoverBtn = SMBTN_MP3;
-		}
-		else if (!musicPlayerBtn.bMouseHover && SMBTN_MP3 == m_iHoverBtn)
+		g_uiCtx.eButtonTextStyle = NeoUI::TEXTSTYLE_CENTER;
+		if (NeoUI::Button(L"Music").bPressed)
 		{
-			m_iHoverBtn = -1;
+			engine->ClientCmd("neo_mp3");
+		}
+		if (NeoUI::Button(L"Credits").bPressed)
+		{
+			m_state = STATE_CREDITS;
 		}
 	}
-	
 	NeoUI::EndSection();
+
 	NeoUI::EndContext();
 }
 
@@ -1050,7 +1041,7 @@ void CNeoRoot::MainLoopSettings(const MainLoopParam param)
 	g_uiCtx.dPanel.y = (param.tall / 2) - (iTallTotal / 2);
 	g_uiCtx.dPanel.tall = g_uiCtx.layout.iRowTall;
 	g_uiCtx.bgColor = COLOR_NEOPANELFRAMEBG;
-	NeoUI::BeginContext(&g_uiCtx, param.eMode, g_pNeoRoot->m_wszDispBtnTexts[MMBTN_OPTIONS], "CtxOptions");
+	NeoUI::BeginContext(&g_uiCtx, param.eMode, g_pNeoRoot->m_wszCachedTexts[MMBTN_OPTIONS], "CtxOptions");
 	{
 		NeoUI::BeginSection(NeoUI::SECTIONFLAG_ROWWIDGETS | NeoUI::SECTIONFLAG_EXCLUDECONTROLLER);
 		{
@@ -1147,7 +1138,7 @@ void CNeoRoot::MainLoopNewGame(const MainLoopParam param)
 	g_uiCtx.dPanel.y = (param.tall / 2) - (iTallTotal / 2);
 	g_uiCtx.dPanel.tall = g_uiCtx.layout.iRowTall * (g_iRowsInScreen + 1);
 	g_uiCtx.bgColor = COLOR_NEOPANELFRAMEBG;
-	NeoUI::BeginContext(&g_uiCtx, param.eMode, m_wszDispBtnTexts[MMBTN_CREATESERVER], "CtxNewGame");
+	NeoUI::BeginContext(&g_uiCtx, param.eMode, m_wszCachedTexts[MMBTN_CREATESERVER], "CtxNewGame");
 	{
 		NeoUI::BeginSection(NeoUI::SECTIONFLAG_DEFAULTFOCUS);
 		{
@@ -1365,7 +1356,7 @@ void CNeoRoot::MainLoopServerBrowser(const MainLoopParam param)
 	g_uiCtx.dPanel.y = (param.tall / 2) - (iTallTotal / 2);
 	g_uiCtx.dPanel.tall = g_uiCtx.layout.iRowTall * 2;
 	g_uiCtx.bgColor = COLOR_NEOPANELFRAMEBG;
-	NeoUI::BeginContext(&g_uiCtx, param.eMode, m_wszDispBtnTexts[MMBTN_FINDSERVER], "CtxServerBrowser");
+	NeoUI::BeginContext(&g_uiCtx, param.eMode, m_wszCachedTexts[MMBTN_FINDSERVER], "CtxServerBrowser");
 	{
 		bool bForceRefresh = false;
 		NeoUI::BeginSection(NeoUI::SECTIONFLAG_ROWWIDGETS);
@@ -1714,6 +1705,107 @@ void CNeoRoot::MainLoopServerBrowser(const MainLoopParam param)
 	}
 	NeoUI::EndContext();
 
+}
+
+static constexpr const wchar_t *CREDITSPEOPLELABEL_NAMES[] = {
+	L"[title]", // NT;RE Contributors
+	L"Adam \"Zwiadowca\" Tomaszewski",
+	L"Agiel",
+	L"Alan \"FCC\" Shen",
+	L"brekiy",
+	L"bryson",
+	L"DESTROYGIRL!",
+	L"kinoko",
+	L"Linn \"Bl\u00E5berry\" Engstr\u00F6m",
+	L"Masterkatze",
+	L"nullsystem",
+	L"plowie",
+	L"Rain",
+	L"StellaNova",
+	L"wak (borntofrag.net)",
+	L"Wray \"wraybies\" Burgess",
+	L"You're Pissed Off",
+	L"[title]", // STUDIO RADI-8
+	L"Justin \"Grey\" Harvey",
+	L"Leri \"pushBAK\" Greer",
+	L"Sam \"Gato\" Greer",
+	L"Jason \"Deej\" Woronicz",
+	L"Finn \"Operation Ivy\" Allen",
+	L"Brian \"Tatsur0\" Comer",
+	L"Jeffery \"Filter Decay\" Pitts",
+	L"Erik \"KillahMo\" Grant",
+	L"Edward \"0edit\" Harrison",
+	L"Glasseater",
+	L"[title]", // NT Contributors
+	L"Violet \"McVee\" McVinnie",
+	L"Joshua \"Supernaut\" Winkelmann",
+	L"Viktor \"Slick Vick\" Svensson",
+	L"Ryan \"Stenchy\" Anderson",
+	L"[title]", // Special Thanks
+	L"Kasietti",
+	L"Kerim \"Nbc66\" Camdzic",
+	L"Tony \"omega\" Sergi"
+};
+
+static constexpr const wchar_t *CREDITSTITLELABEL_NAMES[] = {
+	L"NEOTOKYO;REBUILD Contributors",
+	L"STUDIO RADI-8",
+	L"NEOTOKYO\u00B0 Contributors",
+	L"Special Thanks"
+};
+
+void CNeoRoot::MainLoopCredits(const MainLoopParam param)
+{
+	const int iTallTotal = g_uiCtx.layout.iRowTall * (g_iRowsInScreen + 2);
+	g_uiCtx.dPanel.wide = g_iRootSubPanelWide;
+	g_uiCtx.dPanel.x = (param.wide / 2) - (g_iRootSubPanelWide / 2);
+	g_uiCtx.dPanel.y = (param.tall / 2) - (iTallTotal / 2);
+	g_uiCtx.dPanel.tall = g_uiCtx.layout.iRowTall * (g_iRowsInScreen + 1);
+	g_uiCtx.bgColor = COLOR_NEOPANELFRAMEBG;
+	NeoUI::BeginContext(&g_uiCtx, param.eMode, L"Credits", "CtxCredits");
+	{
+		NeoUI::SwapFont(NeoUI::FONT_NTNORMAL);
+		NeoUI::BeginSection(NeoUI::SECTIONFLAG_DEFAULTFOCUS);
+		{
+			g_uiCtx.eLabelTextStyle = NeoUI::TEXTSTYLE_CENTER;
+			size_t titleIndex = 0;
+			for (const wchar_t *line : CREDITSPEOPLELABEL_NAMES)
+			{
+				if (V_wcscmp(line, L"[title]") == 0)
+				{
+					NeoUI::SwapFont(NeoUI::FONT_NTLARGE);
+					NeoUI::Label(L"");
+					NeoUI::Label(CREDITSTITLELABEL_NAMES[titleIndex]);
+					NeoUI::Label(L"");
+					NeoUI::SwapFont(NeoUI::FONT_NTNORMAL);
+					titleIndex++;
+				}
+				else
+				{
+					NeoUI::Label(line);
+				}
+			}
+			NeoUI::Label(L"");
+			NeoUI::ImageTexture("vgui/hud/kill_kill");
+		}
+		NeoUI::EndSection();
+		g_uiCtx.dPanel.y += g_uiCtx.dPanel.tall;
+		g_uiCtx.dPanel.tall = g_uiCtx.layout.iRowTall;
+		NeoUI::BeginSection(NeoUI::SECTIONFLAG_ROWWIDGETS | NeoUI::SECTIONFLAG_EXCLUDECONTROLLER);
+		{
+			g_uiCtx.eButtonTextStyle = NeoUI::TEXTSTYLE_CENTER;
+			NeoUI::SetPerRowLayout(5);
+			{
+				if (NeoUI::Button(NeoUI::HintAlt(L"Back (ESC)", L"Back (B)")).bPressed || NeoUI::BindKeyBack())
+				{
+					m_state = STATE_ROOT;
+				}
+			}
+		}
+		NeoUI::SwapFont(NeoUI::FONT_NTNORMAL);
+		NeoUI::EndSection();
+	}
+	NeoUI::EndContext();
 }
 
 void CNeoRoot::MainLoopMapList(const MainLoopParam param)
