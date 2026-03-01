@@ -20,6 +20,7 @@
 	#include "c_neo_player.h"
 #else
 	#include "neo_player.h"
+	#include "neo_ghost_spawn_point.h"
 	#include "utlhashtable.h"
 #endif
 
@@ -366,8 +367,8 @@ public:
 		return GetOpposingTeam(player->GetTeamNumber());
 	}
 
-    int roundNumber() const { return m_iRoundNumber; }
-    bool roundAlternate() const { return static_cast<bool>(m_iRoundNumber % 2 == 0); }
+    inline int roundNumber() const { return m_iRoundNumber; }
+    inline bool roundNumberIsEven() const { return (roundNumber() % 2 == 0); }
 
 #ifdef GLOWS_ENABLE
 	void GetTeamGlowColor(int teamNumber, float &r, float &g, float &b)
@@ -418,6 +419,7 @@ public:
 	bool m_bPausedByPreRoundFreeze = false;
 	bool m_bPausingTeamRequestedUnpause = false;
 	bool m_bThinkCheckClantags = false;
+	bool m_bRotatingMapRightNow = false;
 #endif
 	CNetworkVar(float, m_flPauseEnd);
 
@@ -438,6 +440,11 @@ private:
 	float m_flJuggernautDeathTime = 0.0f;
 	int m_iLastJuggernautTeam = TEAM_INVALID;
 	
+	// For looking up capture zone locations
+	friend class CNEOBotCtgCarrier;
+	friend class CNEOBotCtgEscort;
+	friend class CNEOBotCtgLoneWolf;
+
 	friend class CNEOBotSeekAndDestroy;
 	CUtlVector<int> m_pGhostCaps;
 	CWeaponGhost *m_pGhost = nullptr;
@@ -452,6 +459,9 @@ private:
 	int m_iPrintHelpCounter = 0;
 	bool m_bGamemodeTypeBeenInitialized = false;
 	friend class CNEO_GhostBoundary;
+	friend class CNEOGhostSpawnPoint;
+	friend class CMultiplayRules;
+	CUtlVector<CHandle<CNEOGhostSpawnPoint>> m_ghostSpawns;
 	Vector m_vecPreviousGhostSpawn = vec3_origin;
 	Vector m_vecPreviousJuggernautSpawn = vec3_origin;
 	bool m_bGotMatchWinner = false;

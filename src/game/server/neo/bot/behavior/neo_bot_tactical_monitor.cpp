@@ -2,6 +2,7 @@
 #include "fmtstr.h"
 
 #include "neo_gamerules.h"
+#include "nav_ladder.h"
 #include "NextBot/NavMeshEntities/func_nav_prerequisite.h"
 
 #include "bot/neo_bot.h"
@@ -10,11 +11,11 @@
 #include "bot/behavior/neo_bot_tactical_monitor.h"
 #include "bot/behavior/neo_bot_scenario_monitor.h"
 
-#include "bot/behavior/neo_bot_command_follow.h"
 #include "bot/behavior/neo_bot_seek_and_destroy.h"
 #include "bot/behavior/neo_bot_seek_weapon.h"
 #include "bot/behavior/neo_bot_retreat_to_cover.h"
 #include "bot/behavior/neo_bot_retreat_from_grenade.h"
+#include "bot/behavior/neo_bot_ladder_approach.h"
 #include "bot/behavior/neo_bot_pause.h"
 #if 0 // NEO TODO (Adam) Fix picking up weapons, search for dropped weapons to pick up ammo
 #include "bot/behavior/neo_bot_get_ammo.h"
@@ -23,11 +24,9 @@
 #include "bot/behavior/nav_entities/neo_bot_nav_ent_move_to.h"
 #include "bot/behavior/nav_entities/neo_bot_nav_ent_wait.h"
 #include "neo/neo_player_shared.h"
+#include "nav_mesh.h"
 
 ConVar neo_bot_force_jump( "neo_bot_force_jump", "0", FCVAR_CHEAT, "Force bots to continuously jump" );
-ConVar neo_bot_grenade_check_radius( "neo_bot_grenade_check_radius", "500", FCVAR_CHEAT );
-extern ConVar sv_neo_bot_cmdr_enable;
-extern ConVar sv_neo_bot_cmdr_debug_pause_uncommanded;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -178,20 +177,18 @@ void CNEOBotTacticalMonitor::AvoidBumpingFriends( CNEOBot *me )
 }
 
 
+ConVar neo_bot_recon_superjump_min_dist( "neo_bot_recon_superjump_min_dist", "1000", FCVAR_NONE,
+	"Minimum straight-line path distance required for a Recon bot to super jump while moving", true, 0, false, 0 );
+
+ConVar neo_bot_recon_superjump_min_accuracy( "neo_bot_recon_superjump_min_accuracy", "0.95", FCVAR_NONE,
+	"Minimum directional alignment with path required for a Recon bot to super jump while moving", true, 0.1f, false, 1.0f );
+
 //-----------------------------------------------------------------------------------------
 void CNEOBotTacticalMonitor::ReconConsiderSuperJump( CNEOBot *me )
 {
 	CNEO_Player *pNeoMe = ToNEOPlayer(me);
 	if ( !pNeoMe || pNeoMe->GetClass() != NEO_CLASS_RECON )
 	{
-		return;
-	}
-
-	if ( gpGlobals->curtime - pNeoMe->GetLastDamageTime() > 2.0f )
-	{
-		// Not in immediate danger
-		// NEO Jank: We don't check threats because a bot can be attacked by a non-primary threat
-		// Damage taken tends to be a better indicator for immediate danger
 		return;
 	}
 
@@ -209,6 +206,100 @@ void CNEOBotTacticalMonitor::ReconConsiderSuperJump( CNEOBot *me )
 		return;
 	}
 
+	bool bImmediateDanger = gpGlobals->curtime - pNeoMe->GetLastDamageTime() <= 2.0f;
+
+	if (!bImmediateDanger
+		&& (pNeoMe->m_nButtons & IN_FORWARD)
+		&& (neo_bot_recon_superjump_min_dist.GetFloat() > 1))
+	{
+		if (!m_reconSuperJumpPathCheckTimer.IsElapsed())
+		{
+			return;
+		}
+		m_reconSuperJumpPathCheckTimer.Start(1.0f);
+
+		const PathFollower *path = me->GetCurrentPath();
+		if (!path || !path->IsValid())
+		{
+			return;
+		}
+
+		const Path::Segment *seg = path->GetCurrentGoal();
+		if (!seg)
+		{
+			return;
+		}
+
+		// Get the bot motion to know which direction the jump will be boosted
+		Vector vecMovement = me->GetLocomotionInterface()->GetGroundMotionVector();
+		vecMovement.z = 0.0f;
+		vecMovement.NormalizeInPlace();
+
+		// Get the bot's facing direction
+		Vector vecFacing;
+		pNeoMe->EyeVectors( &vecFacing );
+		vecFacing.z = 0.0f;
+		vecFacing.NormalizeInPlace();
+
+		if (vecMovement.Dot(vecFacing) < neo_bot_recon_superjump_min_accuracy.GetFloat())
+		{
+			return;
+		}
+
+		// Check that upcoming path is in line of a jump
+		bool bCanJump = false;
+		while (seg)
+		{
+			constexpr int maskAttributesToStopPathEval = (
+				NAV_MESH_AVOID |
+				NAV_MESH_CLIFF |
+				NAV_MESH_CROUCH |
+				NAV_MESH_HAS_ELEVATOR |
+				NAV_MESH_JUMP | // likely to interrupt superjump trajectory
+				NAV_MESH_NAV_BLOCKER |
+				NAV_MESH_NO_JUMP |
+				NAV_MESH_OBSTACLE_TOP |
+				NAV_MESH_PRECISE |
+				NAV_MESH_STAIRS |
+				NAV_MESH_STOP |
+				NAV_MESH_TRANSIENT
+			);
+
+			if (seg->area && seg->area->HasAttributes( maskAttributesToStopPathEval ))
+			{
+				return; // Don't superjump toward areas with potentially problematic attributes
+			}
+
+			// Sanity check that each waypoint is relatively aligned with our jump direction
+			Vector vecToWaypoint = seg->pos - pNeoMe->GetAbsOrigin();
+			vecToWaypoint.z = 0.0f;
+			
+			float flDist = vecToWaypoint.NormalizeInPlace();
+
+			if (vecMovement.Dot(vecToWaypoint) < neo_bot_recon_superjump_min_accuracy.GetFloat())
+			{
+				return; // Diverges too much from trajectory
+			}
+
+			if (flDist >= neo_bot_recon_superjump_min_dist.GetFloat())
+			{
+				bCanJump = true;
+				break;
+			}
+			else if (flDist < 0)
+			{
+				return; // Just in case of a bad value
+			}
+
+			seg = path->NextSegment(seg);
+		}
+
+		if (!bCanJump)
+		{
+			return;
+		}
+	}
+
 	// NEO Jank: We allow bots to super jump even if they didn't perform the prerequisite inputs
 	// For example, they don't consistently hold sprint when it's appropriate so we just boost their speed
 	me->GetLocomotionInterface()->Run();
@@ -220,40 +311,41 @@ void CNEOBotTacticalMonitor::ReconConsiderSuperJump( CNEOBot *me )
 
 
 //-----------------------------------------------------------------------------------------
-ActionResult< CNEOBot > CNEOBotTacticalMonitor::WatchForGrenades( CNEOBot *me )
+ActionResult< CNEOBot > CNEOBotTacticalMonitor::WatchForLadders( CNEOBot *me )
 {
-	const float flGrenadeCheckRadius = neo_bot_grenade_check_radius.GetFloat();
-	CBaseEntity *closestThreat = NULL;
-	const char *pszGrenadeClass = "neo_grenade_frag";
-	
-	int iSound = CSoundEnt::ActiveList();
-	while ( iSound != SOUNDLIST_EMPTY )
+	// Check if our current path has an approaching ladder segment
+	const PathFollower *path = me->GetCurrentPath();
+	if ( !path || !path->IsValid() )
 	{
-		CSound *pSound = CSoundEnt::SoundPointerForIndex( iSound );
-		if ( !pSound )
-			break;
-
-		if ( (pSound->SoundType() & SOUND_DANGER) && pSound->ValidateOwner() )
-		{
-			float distSqr = ( pSound->GetSoundOrigin() - me->GetAbsOrigin() ).LengthSqr();
-			if ( distSqr <= (flGrenadeCheckRadius * flGrenadeCheckRadius) )
-			{
-				CBaseEntity *pOwner = pSound->m_hOwner.Get();
-				if ( pOwner && FClassnameIs( pOwner, pszGrenadeClass ) )
-				{
-					// Found a dangerous grenade
-					closestThreat = pOwner;
-					break;
-				}
-			}
-		}
-
-		iSound = pSound->NextSound();
+		return Continue();
 	}
 
-	if ( closestThreat )
+	const Path::Segment *goal = path->GetCurrentGoal();
+	if ( !goal || !goal->ladder )
 	{
-		return SuspendFor( new CNEOBotRetreatFromGrenade( closestThreat ), "Fleeing from grenade!" );
+		return Continue();
+	}
+
+	// Already using a ladder via locomotion interface
+	ILocomotion *mover = me->GetLocomotionInterface();
+	if ( mover->IsUsingLadder() || mover->IsAscendingOrDescendingLadder() )
+	{
+		return Continue();
+	}
+
+	// We're approaching a ladder - check distance
+	const float ladderApproachRange = 60.0f;
+	Vector ladderPos = (goal->how == GO_LADDER_UP) 
+		? goal->ladder->m_bottom 
+		: goal->ladder->m_top;
+
+	if ( me->GetAbsOrigin().DistToSqr( ladderPos ) < Square(ladderApproachRange) )
+	{
+		bool goingUp = (goal->how == GO_LADDER_UP);
+		return SuspendFor( 
+			new CNEOBotLadderApproach( goal->ladder, goingUp ), 
+			goingUp ? "Approaching ladder up" : "Approaching ladder down" 
+		);
 	}
 
 	return Continue();
@@ -273,28 +365,17 @@ ActionResult< CNEOBot >	CNEOBotTacticalMonitor::Update( CNEOBot *me, float inter
 
 	ReconConsiderSuperJump( me );
 
-	ActionResult< CNEOBot > result = WatchForGrenades( me );
+	CBaseEntity *dangerousGrenade = CNEOBotRetreatFromGrenade::FindDangerousGrenade( me );
+	if ( dangerousGrenade )
+	{
+		return SuspendFor( new CNEOBotRetreatFromGrenade( dangerousGrenade ), "Fleeing from grenade!" );
+	}
+
+	ActionResult< CNEOBot > result = WatchForLadders( me );
 	if ( result.IsRequestingChange() )
 	{
 		return result;
 	}
-
-	if (sv_neo_bot_cmdr_enable.GetBool())
-	{
-		if (me->m_hLeadingPlayer.Get() || me->m_hCommandingPlayer.Get())
-		{
-			return SuspendFor(new CNEOBotCommandFollow, "Following commander");
-		}
-
-		if (sv_neo_bot_cmdr_debug_pause_uncommanded.GetBool())
-		{
-			return SuspendFor( new CNEOBotPause, "Paused by debug convar sv_neo_bot_cmdr_debug_pause_uncommanded" );
-		}
-	}
-
-#if 0
-	const CKnownEntity *threat = me->GetVisionInterface()->GetPrimaryKnownThreat();
-#endif
 
 	// check if we need to get to cover
 	QueryResultType shouldRetreat = me->GetIntentionInterface()->ShouldRetreat( me );
@@ -372,7 +453,7 @@ ActionResult< CNEOBot > CNEOBotTacticalMonitor::ScavengeForPrimaryWeapon( CNEOBo
 	{
 		return Continue();
 	}
-	m_maintainTimer.Start( RandomFloat( 1.0f, 3.0f ) );
+	m_maintainTimer.Start( 1.0f );
 	
 	// Look for any one valid primary weapon, then dispatch into behavior for more optimal search
 	// true parameter: short-circuit the search if any valid primary weapon is found

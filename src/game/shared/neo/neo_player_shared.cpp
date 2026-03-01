@@ -15,6 +15,7 @@
 #ifdef CLIENT_DLL
 #include "c_neo_player.h"
 #include "c_playerresource.h"
+#define CNEO_Player C_NEO_Player
 #else
 #include "neo_player.h"
 #endif
@@ -52,7 +53,7 @@ ConVar sv_neo_serverside_beacons("sv_neo_serverside_beacons", "1", FCVAR_NOTIFY 
 
 bool IsAllowedToZoom(CNEOBaseCombatWeapon *pWep)
 {
-	if (!pWep || pWep->m_bInReload || pWep->GetRoundBeingChambered() || !pWep->CanAim())
+	if (!pWep || pWep->m_bInReload || !pWep->CanAim())
 	{
 		return false;
 	}
@@ -362,3 +363,29 @@ const char *GetRankName(const int xp, const bool shortened)
 	return "";
 }
 
+void CNEO_Player::CheckAimButtons()
+{
+	if (auto *pNeoWep = static_cast<CNEOBaseCombatWeapon *>(GetActiveWeapon()))
+	{
+		if (IsSprinting() || !IsAllowedToZoom(pNeoWep))
+		{
+			Weapon_SetZoom(false);
+		}
+		else if (m_nButtons & IN_ZOOM)
+		{
+			Weapon_SetZoom(true);
+		}
+		else if (m_afButtonReleased & IN_ZOOM)
+		{
+			Weapon_SetZoom(false);
+		}
+		else if (m_afButtonPressed & IN_AIM)
+		{
+			Weapon_SetZoom(!IsInAim());
+		}
+	}
+	else
+	{
+	    Weapon_SetZoom(false);
+	}
+}

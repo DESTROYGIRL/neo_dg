@@ -161,13 +161,12 @@ USER_MESSAGE_REGISTER(AchievementMark);
 ConVar cl_drawhud_quickinfo("cl_drawhud_quickinfo", "0", 0,
 	"Whether to display HL2 style ammo/health info near crosshair.",
 	true, 0.0f, true, 1.0f);
-
 ConVar cl_neo_streamermode("cl_neo_streamermode", "0", FCVAR_ARCHIVE | FCVAR_USERINFO, "Streamer mode turns player names into generic names and hide avatars.", true, 0.0f, true, 1.0f);
 ConVar cl_neo_streamermode_autodetect_obs("cl_neo_streamermode_autodetect_obs", "0", FCVAR_ARCHIVE, "Automatically turn cl_neo_streamermode on if OBS was detected on startup.", true, 0.0f, true, 1.0f);
 ConVar cl_neo_equip_utility_priority("cl_neo_equip_utility_priority", "1", FCVAR_ARCHIVE, "Utility slot equip priority. 0 = Frag,Smoke,Detpack, 1 = Class Specific First.", true, 0.0f, true, 1.0f);
-
 ConVar cl_neo_tachi_prefer_auto("cl_neo_tachi_prefer_auto", "1", FCVAR_ARCHIVE | FCVAR_USERINFO,
 	"Whether full-auto is the preferred default firing mode for Tachi loadouts.", true, false, true, true);
+ConVar cl_neo_taking_damage_sounds("cl_neo_taking_damage_sounds", "0", FCVAR_USERINFO | FCVAR_ARCHIVE, "Play sounds when taking damage.", true, 0, true, 1);
 
 extern ConVar sv_neo_clantag_allow;
 extern ConVar sv_neo_dev_test_clantag;
@@ -223,7 +222,6 @@ public:
 
 		panel->SetMouseInputEnabled(true);
 		//panel->SetKeyBoardInputEnabled(true);
-		panel->SetCursorAlwaysVisible(true);
 
 		panel->SetControlEnabled("Button1", true);
 		panel->SetControlEnabled("Button2", true);
@@ -330,7 +328,6 @@ public:
 
 		panel->SetMouseInputEnabled(true);
 		//panel->SetKeyBoardInputEnabled(true);
-		panel->SetCursorAlwaysVisible(true);
 
 		panel->SetControlEnabled("Scout_Button", true);
 		panel->SetControlEnabled("Assault_Button", true);
@@ -402,7 +399,6 @@ public:
 
 		panel->SetMouseInputEnabled(true);
 		//panel->SetKeyBoardInputEnabled(true);
-		panel->SetCursorAlwaysVisible(true);
 
 		panel->SetControlEnabled("jinraibutton", true);
 		panel->SetControlEnabled("nsfbutton", true);
@@ -708,7 +704,7 @@ int C_NEO_Player::DrawModel(int flags)
 
 	else if (inThermalVision && !IsCloaked())
 	{
-		IMaterial* pass = materials->FindMaterial("dev/thermal_model", TEXTURE_GROUP_MODEL);
+		IMaterial* pass = materials->FindMaterial(NEO_THERMAL_MODEL_MATERIAL, TEXTURE_GROUP_MODEL);
 		modelrender->ForcedMaterialOverride(pass);
 		ret |= BaseClass::DrawModel(flags);
 		modelrender->ForcedMaterialOverride(nullptr);
@@ -1391,39 +1387,7 @@ void C_NEO_Player::PostThink(void)
 
 	CheckLeanButtons();
 
-	if (auto *pNeoWep = static_cast<C_NEOBaseCombatWeapon *>(GetActiveWeapon()))
-	{
-		if (pNeoWep->m_bInReload && !m_bPreviouslyReloading)
-		{
-			Weapon_SetZoom(false);
-		}
-		else if (CanSprint() && m_afButtonPressed & IN_SPEED)
-		{
-			Weapon_SetZoom(false);
-		}
-		else if (m_nButtons & IN_AIM && !IsInAim())
-		{
-			if (!CanSprint() || !(m_nButtons & IN_SPEED))
-			{
-				Weapon_AimToggle(pNeoWep, NEO_TOGGLE_FORCE_AIM);
-			}
-		}
-		else if (m_afButtonReleased & IN_AIM)
-		{
-			Weapon_AimToggle(pNeoWep, NEO_TOGGLE_FORCE_UN_AIM);
-		}
-
-#if !defined( NO_ENTITY_PREDICTION )
-		// Can't do aim zoom in prediction, because we can't know
-		// server's reload state for our weapon with certainty.
-		if (!GetPredictable() || !prediction->InPrediction())
-		{
-#else
-		if (true) {
-#endif
-			m_bPreviouslyReloading = pNeoWep->m_bInReload;
-		}
-	}
+	CheckAimButtons();
 }
 
 void C_NEO_Player::CalcDeathCamView(Vector &eyeOrigin, QAngle &eyeAngles, float &fov)
@@ -1640,26 +1604,13 @@ void C_NEO_Player::Spawn( void )
 
 	Weapon_SetZoom(false);
 
+
 	SetViewOffset(VEC_VIEW_NEOSCALE(this));
 
 	auto *localPlayer = C_NEO_Player::GetLocalNEOPlayer();
 
 	if (localPlayer == nullptr || localPlayer == this)
 	{
-		// NEO NOTE (nullsystem): Reset Vis/Enabled/MouseInput/Cursor state here, otherwise it can get stuck at situations
-		for (const auto pname : {PANEL_CLASS, PANEL_TEAM, PANEL_NEO_LOADOUT})
-		{
-			if (auto *panel = static_cast<vgui::EditablePanel*>
-					(GetClientModeNormal()->GetViewport()->FindChildByName(pname)))
-			{
-				panel->SetVisible(false);
-				panel->SetEnabled(false);
-				panel->SetMouseInputEnabled(false);
-				panel->SetCursorAlwaysVisible(false);
-				//panel->SetKeyBoardInputEnabled(false);
-			}
-		}
-
 		for (auto *hud : gHUD.m_HudList)
 		{
 			if (auto *neoHud = dynamic_cast<CNEOHud_ChildElement *>(hud))
@@ -1702,10 +1653,6 @@ bool C_NEO_Player::ShouldDrawHL2StyleQuickHud(void)
 void C_NEO_Player::Weapon_Drop(C_NEOBaseCombatWeapon *pWeapon)
 {
 	m_bIneligibleForLoadoutPick = true;
-	if (IsLocalPlayer())
-	{
-		IN_AimToggleReset();
-	}
 
 	if (pWeapon->IsGhost())
 	{
@@ -1860,8 +1807,7 @@ void C_NEO_Player::Weapon_AimToggle(C_NEOBaseCombatWeapon *pNeoWep, const NeoWep
 	{
 		if (toggleType != NEO_TOGGLE_FORCE_UN_AIM)
 		{
-			const bool showCrosshair = (m_Local.m_iHideHUD & HIDEHUD_CROSSHAIR) == HIDEHUD_CROSSHAIR;
-			Weapon_SetZoom(showCrosshair);
+			Weapon_SetZoom(!IsInAim());
 		}
 		else if (toggleType != NEO_TOGGLE_FORCE_AIM)
 		{
@@ -1877,6 +1823,15 @@ void C_NEO_Player::Weapon_SetZoom(const bool bZoomIn)
 		return;
 	}
 
+	if (bZoomIn)
+	{
+		m_Local.m_iHideHUD &= ~HIDEHUD_CROSSHAIR;
+	}
+	else
+	{
+		m_Local.m_iHideHUD |= HIDEHUD_CROSSHAIR;
+	}
+
 	float zoomSpeedSecs = NEO_ZOOM_SPEED;
 
 #if(0)
@@ -1890,19 +1845,6 @@ void C_NEO_Player::Weapon_SetZoom(const bool bZoomIn)
 	}
 #endif
 #endif
-
-	if (bZoomIn)
-	{
-		m_Local.m_iHideHUD &= ~HIDEHUD_CROSSHAIR;
-	}
-	else
-	{
-		m_Local.m_iHideHUD |= HIDEHUD_CROSSHAIR;
-		if (IsLocalPlayer())
-		{
-			IN_AimToggleReset();
-		}
-	}
 
 	const int fov = GetDefaultFOV();
 	SetFOV(static_cast<CBaseEntity *>(this), bZoomIn ? NeoAimFOV(fov, GetActiveWeapon()) : fov, zoomSpeedSecs);

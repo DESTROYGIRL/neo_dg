@@ -1037,9 +1037,12 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 		return false;
 
 
-#if defined(NEO) && defined(DEBUG)
+#ifdef NEO
+	InitializeNeoClRenderer();
+#ifdef DEBUG
 	InitializeDbgNeoClGitHashEdit();
-#endif
+#endif // DEBUG
+#endif // NEO
 
 	// it's ok if this is NULL. That just means the sourcevr.dll wasn't found
 	if ( CommandLine()->CheckParm( "-vr" ) )
@@ -1415,6 +1418,12 @@ void CHLClient::PostInit()
 		g_pCVar->FindVar("sv_use_steam_networking")->SetValue(false);
 		RestrictNeoClientCheats();
 
+		ConVar *sv_maxupdaterate = g_pCVar->FindVar( "sv_maxupdaterate" ); Assert(sv_maxupdaterate);
+		ConVar *cl_updaterate = g_pCVar->FindVar( "cl_updaterate" ); Assert(cl_updaterate);
+		static char svMaxUpdateRateDefault[4];
+		V_strcpy_safe(svMaxUpdateRateDefault, sv_maxupdaterate->GetDefault());
+		cl_updaterate->SetDefault(svMaxUpdateRateDefault);
+
 		// ConVarRef so that it properly sets the ConVar value
 		ConVarRef cvr_cl_neo_cfg_version_major("cl_neo_cfg_version_major");
 		ConVarRef cvr_cl_neo_cfg_version_minor("cl_neo_cfg_version_minor");
@@ -1459,6 +1468,56 @@ void CHLClient::PostInit()
 						V_sprintf_safe(szCmd, "bind \"%s\" \"toggle_aim\"\n", bindBtnName);
 						engine->ClientCmd_Unrestricted(szCmd);
 					}
+				}
+			}
+
+			if (iCfgVerMajor < 25)
+			{
+				const ButtonCode_t bcTAim = gameuifuncs->GetButtonCodeForBind("toggle_aim");
+				if (bcTAim > BUTTON_CODE_NONE)
+				{
+					const char *bindBtnName = g_pInputSystem->ButtonCodeToString(bcTAim);
+					if (bindBtnName && bindBtnName[0])
+					{
+						char szCmd[128];
+
+						V_sprintf_safe(szCmd, "unbind \"%s\"\n", bindBtnName);
+						engine->ClientCmd_Unrestricted(szCmd);
+
+						V_sprintf_safe(szCmd, "bind \"%s\" \"+toggle_aim\"\n", bindBtnName);
+						engine->ClientCmd_Unrestricted(szCmd);
+					}
+				}
+			}
+
+			if (iCfgVerMajor < 26)
+			{
+				ConVarRef cl_software_cursor( "cl_software_cursor" );
+				Assert(cl_software_cursor.IsValid());
+				if (cl_software_cursor.IsValid())
+				{
+					cl_software_cursor.SetValue(true);
+				}
+
+				// voice_modenable is used now instead of voice_enable as
+				// that's how the valve settings menu does it now and
+				// force voice_enable back on
+				ConVarRef cvr_voice_enable("voice_enable");
+				ConVarRef cvr_voice_modenable("voice_modenable");
+				cvr_voice_modenable.SetValue(cvr_voice_enable.GetBool());
+				cvr_voice_enable.SetValue(true);
+			}
+
+			if (iCfgVerMajor < 27)
+			{
+				// because cl_interp_ratio is dependent on this, and the default of 20
+				// is a bit too low to produce sensible default interp values:
+				//   2/20 = 0.1 (i.e. the old cl_interp)
+				//   2/66 = 0.03030... (much better)
+				constexpr int oldClUpdaterateDefault = 20;
+				if (cl_updaterate->GetInt() == oldClUpdaterateDefault)
+				{
+					cl_updaterate->SetValue(svMaxUpdateRateDefault);
 				}
 			}
 

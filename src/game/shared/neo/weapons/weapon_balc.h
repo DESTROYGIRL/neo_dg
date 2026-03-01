@@ -45,6 +45,8 @@ public:
 	virtual float GetSpeedScale(void) const OVERRIDE { return 1.0f; }
 
 	bool CanBePickedUpByClass(int classId) OVERRIDE;
+	virtual bool UsesTracers() override final { return true; }
+	virtual const char *GetTracerType() override final { return "AirboatGunTracer"; }
 	virtual bool CanDrop() final { return false; }
 	virtual bool CanAim() final { return false; }
 

@@ -92,6 +92,13 @@ ActionResult< CNEOBot >	CNEOBotMainAction::Update( CNEOBot *me, float interval )
 	// make sure our vision FOV matches the player's
 	me->GetVisionInterface()->SetFieldOfView( me->GetFOV() );
 
+	if (me->IsCarryingGhost())
+	{
+		// Don't waste cloak power
+		// Incidentally flashing cloak is fine, everyone can see you anyway
+		me->DisableCloak();
+	}
+
 	// track aim velocity ourselves, since body aim "steady" is too loose
 	float deltaYaw = me->EyeAngles().y - m_priorYaw;
 	m_yawRate = fabs( deltaYaw / ( interval + 0.0001f ) );
@@ -176,6 +183,22 @@ ActionResult< CNEOBot >	CNEOBotMainAction::Update( CNEOBot *me, float interval )
 //---------------------------------------------------------------------------------------------
 EventDesiredResult<CNEOBot> CNEOBotMainAction::OnKilled( CNEOBot *me, const CTakeDamageInfo& info )
 {
+	// Encourage bots to avoid areas that are deadly, taking into account everyone's death locations
+	// Intended to add some variance to pathing for similar starting scenarios
+	if ( const CNavArea *navArea = me->GetLastKnownArea() )
+	{
+		CNEOBotPathReservations()->IncrementAreaAvoidPenalty( navArea->GetID(), neo_bot_path_reservation_killed_penalty.GetFloat() );
+	}
+	else
+	{
+		// Fallback if GetLastKnownArea is null, try finding nearest nav area
+		CNavArea *nearestArea = TheNavMesh->GetNearestNavArea( me->GetAbsOrigin() );
+		if ( nearestArea )
+		{
+			CNEOBotPathReservations()->IncrementAreaAvoidPenalty( nearestArea->GetID(), neo_bot_path_reservation_killed_penalty.GetFloat() );
+		}
+	}
+
 	return TryChangeTo( new CNEOBotDead, RESULT_CRITICAL, "I died!" );
 }
 
@@ -245,7 +268,7 @@ EventDesiredResult< CNEOBot > CNEOBotMainAction::OnStuck( CNEOBot *me )
 	// so the overall fairness may balance out for both teams sharing common sticking points.
 	if ( const CNavArea *navArea = me->GetLastKnownArea() )
 	{
-		CNEOBotPathReservations()->IncrementAreaStuckPenalty( navArea->GetID() );
+		CNEOBotPathReservations()->IncrementAreaAvoidPenalty( navArea->GetID(), neo_bot_path_reservation_onstuck_penalty.GetFloat() );
 	}
 	else
 	{
@@ -253,7 +276,7 @@ EventDesiredResult< CNEOBot > CNEOBotMainAction::OnStuck( CNEOBot *me )
 		CNavArea *nearestArea = TheNavMesh->GetNearestNavArea( me->GetAbsOrigin() );
 		if ( nearestArea )
 		{
-			CNEOBotPathReservations()->IncrementAreaStuckPenalty( nearestArea->GetID() );
+			CNEOBotPathReservations()->IncrementAreaAvoidPenalty( nearestArea->GetID(), neo_bot_path_reservation_onstuck_penalty.GetFloat() );
 		}
 	}
 
@@ -266,7 +289,7 @@ EventDesiredResult< CNEOBot > CNEOBotMainAction::OnStuck( CNEOBot *me )
 			{
 				if ( nextSegment->area )
 				{
-					CNEOBotPathReservations()->IncrementAreaStuckPenalty( nextSegment->area->GetID() );
+					CNEOBotPathReservations()->IncrementAreaAvoidPenalty( nextSegment->area->GetID(), neo_bot_path_reservation_onstuck_penalty.GetFloat() );
 				}
 			}
 		}
@@ -607,8 +630,6 @@ void CNEOBotMainAction::FireWeaponAtEnemy( CNEOBot *me )
 
 			if ( m_isWaitingForFullReload )
 			{
-				me->PressCrouchButton(0.3f);
-
 				if ( myWeapon->Clip1() < myWeapon->GetMaxClip1() )
 				{
 					return;
@@ -817,7 +838,6 @@ void CNEOBotMainAction::FireWeaponAtEnemy( CNEOBot *me )
 			}
 			else if (myWeapon->m_iClip1 <= 0)
 			{
-				me->PressCrouchButton(0.3f);
 				if (m_isWaitingForFullReload)
 				{
 					// passthrough: don't introduce decision jitter

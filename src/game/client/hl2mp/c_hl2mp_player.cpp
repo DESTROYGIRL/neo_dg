@@ -1136,12 +1136,14 @@ void C_HL2MP_Player::ItemPreFrame( void )
 	if ( GetFlags() & FL_FROZEN )
 		 return;
 
+#ifndef NEO
 	// Disallow shooting while zooming
 	if ( m_nButtons & IN_ZOOM )
 	{
 		//FIXME: Held weapons like the grenade get sad when this happens
 		m_nButtons &= ~(IN_ATTACK|IN_ATTACK2);
 	}
+#endif
 
 	BaseClass::ItemPreFrame();
 
@@ -1490,7 +1492,7 @@ int C_HL2MPRagdoll::DrawModel(int flags)
 	bool inThermalVision = pTargetPlayer ? (pTargetPlayer->IsInVision() && pTargetPlayer->GetClass() == NEO_CLASS_SUPPORT) : false;
 	if (inThermalVision)
 	{
-		IMaterial* pass = materials->FindMaterial("dev/thermal_ragdoll_model", TEXTURE_GROUP_MODEL);
+		IMaterial* pass = materials->FindMaterial(NEO_THERMAL_MODEL_MATERIAL, TEXTURE_GROUP_MODEL);
 		modelrender->ForcedMaterialOverride(pass);
 		int ret = BaseClass::DrawModel(flags);
 		modelrender->ForcedMaterialOverride(nullptr);

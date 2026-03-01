@@ -663,6 +663,7 @@ void CNEO_Player::Spawn(void)
 	m_flNextPingTime = 0.0f;
 
 	Weapon_SetZoom(false);
+	ShowCrosshair(false);
 
 	SetTransmitState(FL_EDICT_PVSCHECK);
 
@@ -1365,6 +1366,11 @@ float CNEO_Player::GetFogObscuredRatio(CBaseEntity* target) const
 		return 0.0f; // Not obscured
 	}
 
+	if (targetPlayer->IsCarryingGhost())
+	{
+		return 0.0f;
+	}
+
 	// From this point on, assume we are counting bonus points towards observer detection
 	float flDetectionBonus = 0.0f; // # of factors that are helping the observer detect the target
 
@@ -1627,29 +1633,10 @@ void CNEO_Player::PostThink(void)
 
 	CheckLeanButtons();
 
+	CheckAimButtons();
+
 	if (auto *pNeoWep = static_cast<CNEOBaseCombatWeapon *>(GetActiveWeapon()))
 	{
-		if (pNeoWep->m_bInReload && !m_bPreviouslyReloading)
-		{
-			Weapon_SetZoom(false);
-		}
-		else if (CanSprint() && m_afButtonPressed & IN_SPEED)
-		{
-			Weapon_SetZoom(false);
-		}
-		else if (m_nButtons & IN_AIM && !IsInAim())
-		{
-			if (!CanSprint() || !(m_nButtons & IN_SPEED))
-			{
-				Weapon_AimToggle(pNeoWep, NEO_TOGGLE_FORCE_AIM);
-			}
-		}
-		else if (m_afButtonReleased & IN_AIM)
-		{
-			Weapon_AimToggle(pNeoWep, NEO_TOGGLE_FORCE_UN_AIM);
-		}
-		m_bPreviouslyReloading = pNeoWep->m_bInReload;
-
 		if (m_afButtonPressed & IN_DROP)
 		{
 			Vector eyeForward;
@@ -1680,8 +1667,7 @@ void CNEO_Player::Weapon_AimToggle(CNEOBaseCombatWeapon *pNeoWep, const NeoWepon
 	{
 		if (toggleType != NEO_TOGGLE_FORCE_UN_AIM)
 		{
-			const bool showCrosshair = (m_Local.m_iHideHUD & HIDEHUD_CROSSHAIR) == HIDEHUD_CROSSHAIR;
-			Weapon_SetZoom(showCrosshair);
+			Weapon_SetZoom(!IsInAim());
 		}
 		else if (toggleType != NEO_TOGGLE_FORCE_AIM)
 		{
@@ -1792,13 +1778,11 @@ void CNEO_Player::Weapon_SetZoom(const bool bZoomIn)
 	}
 
 	ShowCrosshair(bZoomIn);
-	
+
 	const int fov = GetDefaultFOV();
 	SetFOV(static_cast<CBaseEntity *>(this), bZoomIn ? NeoAimFOV(fov, GetActiveWeapon()) : fov, NEO_ZOOM_SPEED);
 	m_bInAim = bZoomIn;
 }
-
-
 
 // Purpose: Suicide, but cancel the point loss.
 void CNEO_Player::SoftSuicide(void)
@@ -2395,8 +2379,6 @@ bool CNEO_Player::Weapon_Switch( CBaseCombatWeapon *pWeapon,
 		activeWeapon->StopWeaponSound(RELOAD_NPC);
 	}
 
-	ShowCrosshair(false);
-	Weapon_SetZoom(false);
 	return BaseClass::Weapon_Switch(pWeapon, viewmodelindex);
 }
 
@@ -2525,8 +2507,6 @@ void CNEO_Player::SetPlayerTeamModel( void )
 	SetModel(model);
 	SetPlaybackRate(1.0f);
 	//ResetAnimation();
-
-	DevMsg("Set model: %s\n", model);
 
 	//SetupPlayerSoundsByModel(model); // TODO
 
@@ -2671,7 +2651,7 @@ CBaseEntity* CNEO_Player::EntSelectSpawnPoint( void )
 	CBaseEntity *pSpot = NULL;
 	CBaseEntity *pLastSpawnPoint = g_pLastSpawn;
 	const char *pSpawnpointName = "info_player_start";
-	const auto alternate = NEORules()->roundAlternate();
+	const auto alternate = NEORules()->roundNumberIsEven();
 
 	// NEO TODO (nullsystem): Teamplay vs non-teamplay
 	// info_player_deathmatch is from HL2MP, but maps can utilize HL2MP and this entity anyway
@@ -3002,12 +2982,18 @@ int	CNEO_Player::OnTakeDamage_Alive(const CTakeDamageInfo& info)
 {
 	if (m_takedamage != DAMAGE_EVENTS_ONLY)
 	{
-		if (sv_neo_warmup_godmode.GetBool() &&
-				(NEORules()->GetRoundStatus() == NeoRoundStatus::Idle ||
-				 NEORules()->GetRoundStatus() == NeoRoundStatus::Warmup ||
-				 NEORules()->GetRoundStatus() == NeoRoundStatus::Countdown))
+		if (sv_neo_warmup_godmode.GetBool())
 		{
-			return 0;
+			switch (NEORules()->GetRoundStatus())
+			{
+			case NeoRoundStatus::Idle:
+			case NeoRoundStatus::Warmup:
+			case NeoRoundStatus::Countdown:
+			case NeoRoundStatus::Pause:
+				return 0;
+			default:
+				break;
+			}
 		}
 
 		// Checking because attacker might be prop or world
@@ -3155,6 +3141,7 @@ void CNEO_Player::GiveDefaultItems(void)
 		Weapon_Switch(Weapon_OwnsThisType("weapon_tachi"));
 		break;
 	case NEO_CLASS_SUPPORT:
+		GiveNamedItem("weapon_knife");
 		GiveNamedItem("weapon_kyla");
 		GiveNamedItem("weapon_smokegrenade");
 		Weapon_Switch(Weapon_OwnsThisType("weapon_kyla"));
@@ -3192,7 +3179,7 @@ void CNEO_Player::GiveLoadoutWeapon(void)
 			CNEOWeaponLoadout::s_LoadoutWeapons[iLoadoutClass][m_iLoadoutWepChoice].info.m_szWeaponEntityName :
 			"";
 #if DEBUG
-	DevMsg("Loadout slot: %i (\"%s\") for %s\n", m_iLoadoutWepChoice.Get(), szWep, GetPlayerName());
+	//DevMsg("Loadout slot: %i (\"%s\") for %s\n", m_iLoadoutWepChoice.Get(), szWep, GetPlayerName());
 #endif
 
 	// If I already own this type don't create one
