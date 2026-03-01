@@ -194,13 +194,13 @@ void CWeaponBALC::ItemPostFrame(void)
 	auto pOwner = ToBasePlayer(GetOwner());
 	if (pOwner && !m_bOverheated && !ShootingIsPrevented() && !(pOwner->m_nButtons & IN_ATTACK))
 	{
-		if (pOwner->m_afButtonPressed & IN_AIM && !m_bCharging)
+		if (pOwner->m_afButtonPressed & (IN_AIM | IN_ZOOM) && !m_bCharging)
 		{
 			m_bCharging = true;
 			m_flChargeStartTime = gpGlobals->curtime;
 			WeaponSound(SPECIAL3);
 		}
-		else if (pOwner->m_afButtonReleased & IN_AIM && m_bCharging)
+		else if (pOwner->m_afButtonReleased & (IN_AIM | IN_ZOOM) && m_bCharging)
 		{
 			m_bCharging = false;
 			m_bCharged = false;

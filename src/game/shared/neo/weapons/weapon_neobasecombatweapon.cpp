@@ -637,7 +637,7 @@ void CNEOBaseCombatWeapon::ItemPostFrame(void)
 		m_bTriggerReset = true;
 	}
 
-	const bool bInSecondaryAttack = CanAim() ? pOwner->m_nButtons & IN_ATTACK2 : pOwner->m_nButtons & IN_AIM;
+	const bool bInSecondaryAttack = CanAim() ? pOwner->m_nButtons & IN_ATTACK2 : pOwner->m_nButtons & (IN_AIM | IN_ZOOM);
 
 	//Track the duration of the fire
 	//FIXME: Check for IN_ATTACK2 as well?
